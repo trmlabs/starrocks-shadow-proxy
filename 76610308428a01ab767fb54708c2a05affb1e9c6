@@ -1,0 +1,91 @@
+mysql_protocol.go
+  c04f5088f7060f16 1-650
+metrics_test.go
+  c04f5088f7060f16 1-57
+docker-compose.test.yaml
+  c04f5088f7060f16 1-68
+main.go
+  c04f5088f7060f16 1-199
+config_test.go
+  c04f5088f7060f16 1-166
+monitoring/prometheus.yml
+  c04f5088f7060f16 1-46
+README.md
+  c04f5088f7060f16 1-574
+.github/workflows/release.yml
+  c04f5088f7060f16 1-52
+.gitignore
+  c04f5088f7060f16 1-19
+minikube/test.sh
+  c04f5088f7060f16 256-257
+go.mod
+  c04f5088f7060f16 1-48
+proxy_test.go
+  c04f5088f7060f16 1-1845
+load-test.sh
+  c04f5088f7060f16 1-99
+query_logger_test.go
+  c04f5088f7060f16 1-165
+metrics.go
+  c04f5088f7060f16 1-196
+minikube/README.md
+  c04f5088f7060f16 83,129,154,304-305,308,310-312,314-317
+proxy.go
+  c04f5088f7060f16 1-722
+.github/workflows/ci.yml
+  c04f5088f7060f16 1-48
+docs/usage-patterns.md
+  c04f5088f7060f16 1-133
+minikube/primary/shadow-proxy.yaml
+  c04f5088f7060f16 45
+Makefile
+  c04f5088f7060f16 1-119
+mysql_protocol_test.go
+  c04f5088f7060f16 1-631
+config.go
+  c04f5088f7060f16 1-107
+monitoring/grafana/provisioning/dashboards/dashboards.yml
+  c04f5088f7060f16 1-11
+CONTRIBUTING.md
+  c04f5088f7060f16 1-74
+monitoring/grafana/provisioning/datasources/datasources.yml
+  c04f5088f7060f16 1-10
+shadow_worker.go
+  c04f5088f7060f16 1-297
+CHANGELOG.md
+  c04f5088f7060f16 1-25
+Dockerfile
+  c04f5088f7060f16 1-32
+docker-compose.local.yaml
+  c04f5088f7060f16 1-191
+query_logger.go
+  c04f5088f7060f16 1-416
+mysql_auth.go
+  c04f5088f7060f16 1-214
+LICENSE
+  c04f5088f7060f16 1-190
+mysql_auth_test.go
+  c04f5088f7060f16 1-122
+test-local.sh
+  c04f5088f7060f16 1-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "76610308428a01ab767fb54708c2a05affb1e9c6",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 9913,
+      "total_deletions": 55,
+      "accepted_lines": 7596,
+      "overriden_lines": 0
+    }
+  }
+}
