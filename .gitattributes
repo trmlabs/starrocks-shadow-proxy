@@ -1,0 +1,2 @@
+go.sum linguist-generated
+monitoring/grafana/dashboards/*.json linguist-generated

@@ -1,0 +1,134 @@
+# Shadow Proxy Deployment for Minikube
+# Connects to primary StarRocks (same namespace) and shadow StarRocks (different namespace)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shadow-proxy-config
+  namespace: starrocks-primary
+data:
+  # Primary StarRocks FE Service in same namespace
+  PRIMARY_HOST: "primary-starrocks-fe-service.starrocks-primary.svc.cluster.local"
+  PRIMARY_PORT: "9030"
+  # Shadow StarRocks FE Service in different namespace
+  SHADOW_HOST: "shadow-starrocks-fe-service.starrocks-shadow.svc.cluster.local"
+  SHADOW_PORT: "9030"
+  LISTEN_ADDR: ":3306"
+  METRICS_PORT: ":9090"
+  # TLS enabled - proxy terminates TLS from clients
+  TLS_ENABLED: "true"
+  TLS_CERT_FILE: "/certs/tls.crt"
+  TLS_KEY_FILE: "/certs/tls.key"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-proxy
+  namespace: starrocks-primary
+  labels:
+    app: shadow-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shadow-proxy
+  template:
+    metadata:
+      labels:
+        app: shadow-proxy
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: shadow-proxy
+          image: shadow-proxy:latest
+          imagePullPolicy: Never  # Use local image
+          ports:
+            - name: mysql
+              containerPort: 3306
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: shadow-proxy-config
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: shadow-proxy-tls
+---
+# ClusterIP Service for internal access
+apiVersion: v1
+kind: Service
+metadata:
+  name: shadow-proxy
+  namespace: starrocks-primary
+  labels:
+    app: shadow-proxy
+spec:
+  type: ClusterIP
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+  selector:
+    app: shadow-proxy
+---
+# NodePort Service for external access (via minikube)
+apiVersion: v1
+kind: Service
+metadata:
+  name: shadow-proxy-nodeport
+  namespace: starrocks-primary
+  labels:
+    app: shadow-proxy
+spec:
+  type: NodePort
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+      nodePort: 30306
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
+  selector:
+    app: shadow-proxy

@@ -1,0 +1,66 @@
+# Docker Compose for local integration testing
+# Simulates primary and shadow MySQL servers
+
+services:
+  # Mock primary StarRocks (using MySQL for testing)
+  primary-db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: primarypass
+      MYSQL_DATABASE: testdb
+    ports:
+      - "13306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Mock shadow StarRocks (using MySQL for testing)
+  shadow-db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: shadowpass
+      MYSQL_DATABASE: testdb
+    ports:
+      - "13307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Shadow proxy
+  shadow-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PRIMARY_HOST: primary-db
+      PRIMARY_PORT: "3306"
+      PRIMARY_USER: root
+      PRIMARY_PASSWORD: primarypass
+      SHADOW_HOST: shadow-db
+      SHADOW_PORT: "3306"
+      SHADOW_USER: root
+      SHADOW_PASSWORD: shadowpass
+      LISTEN_ADDR: ":3306"
+      METRICS_PORT: ":9090"
+    ports:
+      - "3306:3306"
+      - "9090:9090"
+    depends_on:
+      primary-db:
+        condition: service_healthy
+      shadow-db:
+        condition: service_healthy
+
+  # Prometheus for metrics visualization
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - shadow-proxy

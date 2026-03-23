@@ -1,0 +1,46 @@
+# Prometheus configuration for StarRocks shadow proxy testing
+# Scrapes metrics from both clusters and the shadow proxy
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Shadow Proxy metrics
+  - job_name: 'shadow-proxy'
+    static_configs:
+      - targets: ['shadow-proxy:9090']
+        labels:
+          service: 'shadow-proxy'
+
+  # Primary StarRocks FE (for native query latency metrics)
+  - job_name: 'starrocks-fe-primary'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['primary-fe:8030']
+        labels:
+          cluster: 'primary'
+
+  # Primary StarRocks BE
+  - job_name: 'starrocks-be-primary'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['primary-be:8040']
+        labels:
+          cluster: 'primary'
+
+  # Shadow StarRocks FE (for native query latency metrics)
+  - job_name: 'starrocks-fe-shadow'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['shadow-fe:8030']
+        labels:
+          cluster: 'shadow'
+
+  # Shadow StarRocks BE
+  - job_name: 'starrocks-be-shadow'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['shadow-be:8040']
+        labels:
+          cluster: 'shadow'
