@@ -1,0 +1,105 @@
+.github/workflows/release.yml
+  c04f5088f7060f16 1-52
+proxy_test.go
+  c04f5088f7060f16 1-1845
+monitoring/prometheus.yml
+  c04f5088f7060f16 1-46
+LICENSE
+  c04f5088f7060f16 1-190
+CODE_OF_CONDUCT.md
+  c04f5088f7060f16 1-11
+.github/ISSUE_TEMPLATE/feature_request.md
+  c04f5088f7060f16 1-19
+mysql_protocol_test.go
+  c04f5088f7060f16 1-631
+docker-compose.local.yaml
+  c04f5088f7060f16 1-191
+mysql_auth.go
+  c04f5088f7060f16 1-214
+.gitignore
+  c04f5088f7060f16 1-19
+mysql_protocol.go
+  c04f5088f7060f16 1-650
+.github/PULL_REQUEST_TEMPLATE.md
+  c04f5088f7060f16 1-18
+main.go
+  c04f5088f7060f16 1-199
+Makefile
+  c04f5088f7060f16 1-119
+.gitattributes
+  c04f5088f7060f16 1-2
+.github/workflows/ci.yml
+  c04f5088f7060f16 1-48
+metrics.go
+  c04f5088f7060f16 1-196
+.github/ISSUE_TEMPLATE/bug_report.md
+  c04f5088f7060f16 1-32
+config.go
+  c04f5088f7060f16 1-107
+query_logger_test.go
+  c04f5088f7060f16 1-165
+monitoring/grafana/provisioning/datasources/datasources.yml
+  c04f5088f7060f16 1-10
+test-local.sh
+  c04f5088f7060f16 1-54
+go.mod
+  c04f5088f7060f16 1-48
+minikube/primary/shadow-proxy.yaml
+  c04f5088f7060f16 45
+query_logger.go
+  c04f5088f7060f16 1-416
+mysql_auth_test.go
+  c04f5088f7060f16 1-122
+minikube/README.md
+  c04f5088f7060f16 83,129,154,304-305,308,310-312,314-317
+metrics_test.go
+  c04f5088f7060f16 1-57
+CONTRIBUTING.md
+  c04f5088f7060f16 1-74
+proxy.go
+  c04f5088f7060f16 1-722
+shadow_worker.go
+  c04f5088f7060f16 1-297
+load-test.sh
+  c04f5088f7060f16 1-99
+config_test.go
+  c04f5088f7060f16 1-166
+minikube/test.sh
+  c04f5088f7060f16 256-257
+Dockerfile
+  c04f5088f7060f16 1-32
+docker-compose.test.yaml
+  c04f5088f7060f16 1-66
+README.md
+  c04f5088f7060f16 1-574
+docs/usage-patterns.md
+  c04f5088f7060f16 1-133
+.golangci.yml
+  c04f5088f7060f16 1-27
+SECURITY.md
+  c04f5088f7060f16 1-32
+monitoring/grafana/provisioning/dashboards/dashboards.yml
+  c04f5088f7060f16 1-11
+CHANGELOG.md
+  c04f5088f7060f16 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "560687a8cb2afbfe501988be47426106b740c0ae",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 10054,
+      "total_deletions": 57,
+      "accepted_lines": 7735,
+      "overriden_lines": 0
+    }
+  }
+}
