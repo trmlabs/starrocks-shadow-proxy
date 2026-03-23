@@ -1,0 +1,87 @@
+Makefile
+  c04f5088f7060f16 1-119
+metrics_test.go
+  c04f5088f7060f16 1-57
+.gitignore
+  c04f5088f7060f16 1-19
+docker-compose.local.yaml
+  c04f5088f7060f16 1-192
+.github/workflows/release.yml
+  c04f5088f7060f16 1-54
+proxy.go
+  c04f5088f7060f16 1-722
+query_logger.go
+  c04f5088f7060f16 1-416
+monitoring/prometheus.yml
+  c04f5088f7060f16 1-46
+config_test.go
+  c04f5088f7060f16 1-166
+load-test.sh
+  c04f5088f7060f16 1-99
+metrics.go
+  c04f5088f7060f16 1-196
+monitoring/grafana/dashboards/shadow-proxy-groundcover.json
+  c04f5088f7060f16 1-2289
+monitoring/grafana/provisioning/dashboards/dashboards.yml
+  c04f5088f7060f16 1-11
+docker-compose.test.yaml
+  c04f5088f7060f16 1-68
+query_logger_test.go
+  c04f5088f7060f16 1-165
+test-local.sh
+  c04f5088f7060f16 1-54
+go.mod
+  c04f5088f7060f16 1-48
+main.go
+  c04f5088f7060f16 1-199
+Dockerfile
+  c04f5088f7060f16 1-32
+mysql_auth.go
+  c04f5088f7060f16 1-214
+monitoring/grafana/provisioning/datasources/datasources.yml
+  c04f5088f7060f16 1-10
+LICENSE
+  c04f5088f7060f16 1-190
+docs/usage-patterns.md
+  c04f5088f7060f16 1-133
+CONTRIBUTING.md
+  c04f5088f7060f16 1-74
+mysql_protocol.go
+  c04f5088f7060f16 1-650
+.github/workflows/ci.yml
+  c04f5088f7060f16 1-48
+README.md
+  c04f5088f7060f16 1-574
+config.go
+  c04f5088f7060f16 1-107
+mysql_auth_test.go
+  c04f5088f7060f16 1-122
+CHANGELOG.md
+  c04f5088f7060f16 1-25
+proxy_test.go
+  c04f5088f7060f16 1-1845
+shadow_worker.go
+  c04f5088f7060f16 1-298
+mysql_protocol_test.go
+  c04f5088f7060f16 1-631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "dcf5c61824f0a235bb8794ff2bef2352b02fefae",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 9873,
+      "total_deletions": 0,
+      "accepted_lines": 9873,
+      "overriden_lines": 0
+    }
+  }
+}
