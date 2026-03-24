@@ -1,0 +1,31 @@
+proxy_test.go
+  c04f5088f7060f16 651,676-682,1102
+proxy.go
+  c04f5088f7060f16 65-69,213-214,216,218,501-502,509,511
+main.go
+  c04f5088f7060f16 197-198
+shadow_worker.go
+  c04f5088f7060f16 223
+mysql_auth.go
+  c04f5088f7060f16 62,65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "9e4e1252c39c9643fad35041c920fc86dfa1b2f3",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 16,
+      "accepted_lines": 27,
+      "overriden_lines": 0
+    }
+  }
+}
