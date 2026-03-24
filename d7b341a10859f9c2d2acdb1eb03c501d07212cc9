@@ -1,0 +1,23 @@
+.golangci.yml
+  c04f5088f7060f16 23-26,30-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "d7b341a10859f9c2d2acdb1eb03c501d07212cc9",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 3,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
