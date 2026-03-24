@@ -1,0 +1,23 @@
+main.go
+  c04f5088f7060f16 197-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "ea82a668c870c03ee5721e783adbf63247922e81",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
