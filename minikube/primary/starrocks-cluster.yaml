@@ -1,0 +1,97 @@
+# Primary StarRocks Cluster for Minikube Testing
+# Minimal resources for local development
+apiVersion: starrocks.com/v1
+kind: StarRocksCluster
+metadata:
+  name: primary-starrocks
+  namespace: starrocks-primary
+spec:
+  starRocksFeSpec:
+    image: starrocks/fe-ubuntu:4.0.3
+    imagePullPolicy: IfNotPresent
+    replicas: 1
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+    service:
+      type: ClusterIP
+      ports:
+        - name: http
+          port: 8030
+          containerPort: 8030
+        - name: rpc
+          port: 9020
+          containerPort: 9020
+        - name: query
+          port: 9030
+          containerPort: 9030
+    configMapInfo:
+      configMapName: primary-fe-config
+      resolveKey: fe.conf
+    storageVolumes:
+      - name: fe-meta
+        storageClassName: standard
+        storageSize: 5Gi
+        mountPath: /opt/starrocks/fe/meta
+
+  starRocksBeSpec:
+    image: starrocks/be-ubuntu:4.0.3
+    imagePullPolicy: IfNotPresent
+    replicas: 1
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+    service:
+      type: ClusterIP
+    configMapInfo:
+      configMapName: primary-be-config
+      resolveKey: be.conf
+    storageVolumes:
+      - name: be-data
+        storageClassName: standard
+        storageSize: 10Gi
+        mountPath: /opt/starrocks/be/storage
+---
+# FE Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: primary-fe-config
+  namespace: starrocks-primary
+data:
+  fe.conf: |
+    LOG_DIR = ${STARROCKS_HOME}/log
+    DATE = "$(date +%Y%m%d-%H%M%S)"
+    JAVA_OPTS="-Dlog4j2.formatMsgNoLookups=true -Xmx1536m -XX:+UseG1GC -Xlog:gc*:${LOG_DIR}/fe.gc.log.$DATE:time"
+    http_port = 8030
+    rpc_port = 9020
+    query_port = 9030
+    edit_log_port = 9010
+    sys_log_level = INFO
+    # Minimal settings for testing
+    tablet_create_timeout_second = 60
+    alter_table_timeout_second = 86400
+---
+# BE Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: primary-be-config
+  namespace: starrocks-primary
+data:
+  be.conf: |
+    LOG_DIR = ${STARROCKS_HOME}/log
+    sys_log_level = INFO
+    be_port = 9060
+    be_http_port = 8040
+    heartbeat_service_port = 9050
+    brpc_port = 8060
+    # Minimal memory settings for testing
+    mem_limit = 80%
+    storage_root_path = /opt/starrocks/be/storage

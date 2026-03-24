@@ -1,0 +1,19 @@
+# Build artifacts
+starrocks-shadow-proxy
+coverage.out
+coverage.html
+
+# Go vendor directory
+vendor/
+
+# Generated TLS certificates (keep generate-certs.sh)
+certs/*.key
+certs/*.crt
+certs/*.csr
+certs/*.pem
+certs/*.p12
+certs/*.srl
+certs/server.conf
+
+# Local Docker integration tests
+docker-tests/

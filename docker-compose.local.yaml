@@ -1,0 +1,191 @@
+# Local testing setup with two StarRocks clusters, shadow proxy, and monitoring
+# Based on: https://docs.starrocks.io/docs/administration/management/monitoring/Monitor_and_Alert/
+#
+# Usage:
+#   docker compose -f docker-compose.local.yaml up --build
+#
+# Access:
+#   Proxy:       mysql -h 127.0.0.1 -P 3306 -u root
+#   Primary:     mysql -h 127.0.0.1 -P 9030 -u root
+#   Shadow:      mysql -h 127.0.0.1 -P 9031 -u root
+#   Grafana:     http://localhost:3000 (admin/admin)
+#   Prometheus:  http://localhost:9091
+#   Proxy Metrics: http://localhost:9090/metrics
+#
+# Note: For production TLS, use GCP TCP Proxy Load Balancer with managed SSL certificate.
+#       MySQL's SSL is application-layer (not TCP-level TLS), so stunnel doesn't work.
+
+services:
+  # ===================
+  # PRIMARY CLUSTER
+  # ===================
+  primary-fe:
+    image: starrocks/fe-ubuntu:3.2.11
+    hostname: primary-fe
+    container_name: primary-fe
+    user: root
+    command: |
+      bash -c "
+        /opt/starrocks/fe/bin/start_fe.sh --host_type FQDN
+      "
+    ports:
+      - "8030:8030"   # HTTP (metrics)
+      - "9020:9020"   # RPC
+      - "9030:9030"   # MySQL
+    networks:
+      - sr-network
+    healthcheck:
+      test: 'mysql -u root -h primary-fe -P 9030 -e "SHOW FRONTENDS\G" | grep "Alive: true"'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  primary-be:
+    image: starrocks/be-ubuntu:3.2.11
+    hostname: primary-be
+    container_name: primary-be
+    user: root
+    command:
+      - /bin/bash
+      - -c
+      - |
+        ulimit -n 65535
+        sleep 20s
+        mysql --connect-timeout 10 -h primary-fe -P 9030 -u root -e "ALTER SYSTEM ADD BACKEND \"primary-be:9050\";"
+        bash /opt/starrocks/be/bin/start_be.sh
+    ports:
+      - "8040:8040"   # HTTP (metrics)
+    depends_on:
+      primary-fe:
+        condition: service_healthy
+    networks:
+      - sr-network
+    environment:
+      - HOST_TYPE=FQDN
+
+  # ===================
+  # SHADOW CLUSTER
+  # ===================
+  shadow-fe:
+    image: starrocks/fe-ubuntu:4.0-latest
+    hostname: shadow-fe
+    container_name: shadow-fe
+    user: root
+    command: |
+      bash -c "
+        /opt/starrocks/fe/bin/start_fe.sh --host_type FQDN
+      "
+    ports:
+      - "8031:8030"   # HTTP (metrics) - different port
+      - "9021:9020"   # RPC  
+      - "9031:9030"   # MySQL
+    networks:
+      - sr-network
+    healthcheck:
+      test: 'mysql -u root -h shadow-fe -P 9030 -e "SHOW FRONTENDS\G" | grep "Alive: true"'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  shadow-be:
+    image: starrocks/be-ubuntu:4.0-latest
+    hostname: shadow-be
+    container_name: shadow-be
+    user: root
+    command:
+      - /bin/bash
+      - -c
+      - |
+        ulimit -n 65535
+        sleep 20s
+        mysql --connect-timeout 10 -h shadow-fe -P 9030 -u root -e "ALTER SYSTEM ADD BACKEND \"shadow-be:9050\";"
+        bash /opt/starrocks/be/bin/start_be.sh
+    ports:
+      - "8041:8040"   # HTTP (metrics) - different port
+    depends_on:
+      shadow-fe:
+        condition: service_healthy
+    networks:
+      - sr-network
+    environment:
+      - HOST_TYPE=FQDN
+
+  # ===================
+  # SHADOW PROXY
+  # ===================
+  shadow-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shadow-proxy
+    ports:
+      - "3306:3306"   # MySQL proxy port (plain TCP)
+      - "9090:9090"   # Prometheus metrics
+    environment:
+      - PRIMARY_HOST=primary-fe
+      - PRIMARY_PORT=9030
+      - PRIMARY_USER=root
+      - PRIMARY_PASSWORD=
+      - SHADOW_HOST=shadow-fe
+      - SHADOW_PORT=9030
+      - SHADOW_USER=root
+      - SHADOW_PASSWORD=
+      - LISTEN_ADDR=:3306
+      - METRICS_PORT=:9090
+    depends_on:
+      primary-fe:
+        condition: service_healthy
+      shadow-fe:
+        condition: service_healthy
+    networks:
+      - sr-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ===================
+  # PROMETHEUS
+  # ===================
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: prometheus
+    ports:
+      - "9091:9090"   # Prometheus UI
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=1d'
+    networks:
+      - sr-network
+    depends_on:
+      - shadow-proxy
+
+  # ===================
+  # GRAFANA
+  # ===================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    ports:
+      - "3000:3000"   # Grafana UI
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - sr-network
+    depends_on:
+      - prometheus
+
+networks:
+  sr-network:
+    driver: bridge
