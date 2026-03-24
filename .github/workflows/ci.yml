@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-hardened-latest-m
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -23,7 +23,7 @@ jobs:
         run: make bench
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-hardened-latest-m
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -34,7 +34,7 @@ jobs:
           version: v1.64
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-hardened-latest-m
     strategy:
       matrix:
         goos: [linux]
