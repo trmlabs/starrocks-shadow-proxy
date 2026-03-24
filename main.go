@@ -194,6 +194,7 @@ func main() {
 	}()
 
 	if err := proxy.Start(ctx, queryLogger); err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		os.Exit(1)
 	}
 }

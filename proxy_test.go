@@ -648,7 +648,7 @@ func TestProxyWithMockServers(t *testing.T) {
 	}
 
 	proxyConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, err = proxyConn.Read(buf)
+	_, err = proxyConn.Read(buf)
 	if err != nil {
 		t.Fatalf("Failed to read auth response from proxy: %v", err)
 	}
@@ -673,7 +673,13 @@ func TestProxyWithMockServers(t *testing.T) {
 		t.Errorf("Expected MySQL OK packet (0x00), got 0x%02X (len=%d)", buf[4], n)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	// Allow time for async shadow mirroring to complete (CI runners can be slow)
+	for i := 0; i < 20; i++ {
+		if len(shadowServer.Received()) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	if !shadowServer.AuthSuccess() {
 		t.Error("Shadow server authentication failed - proxy did not authenticate with shadow")
@@ -1093,7 +1099,7 @@ func TestConcurrentConnections(t *testing.T) {
 			}
 
 			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-			n, err = conn.Read(buf)
+			_, err = conn.Read(buf)
 			if err != nil {
 				errors <- fmt.Errorf("client %d: auth response failed: %v", clientID, err)
 				return

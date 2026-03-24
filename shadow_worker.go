@@ -220,7 +220,7 @@ func (w *ShadowWorker) processRequest(req QueryRequest, reader *MySQLPacketReade
 	// Read response using command-aware dispatch.
 	// Simple commands (COM_INIT_DB, COM_PING) always return a single OK/ERR packet,
 	// so we bypass the full result-set parser to avoid hangs on unexpected status flags.
-	w.conn.SetReadDeadline(time.Now().Add(w.config.ShadowReadTimeout))
+	_ = w.conn.SetReadDeadline(time.Now().Add(w.config.ShadowReadTimeout))
 	var bytesRead int64
 	var readErr error
 	if isSimpleResponseCommand(cmd) {

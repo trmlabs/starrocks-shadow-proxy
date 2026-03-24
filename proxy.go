@@ -62,7 +62,11 @@ func (p *TCPProxy) dialBackend(addr string) (net.Conn, error) {
 	return dialer.Dial("tcp", addr)
 }
 
-// dialShadow connects to shadow with optional TLS
+// dialShadow connects to shadow with optional TLS.
+// Currently unused — shadow connections are established during authentication
+// in authenticateWithShadow. Retained for potential future use.
+//
+//nolint:unused
 func (p *TCPProxy) dialShadow() (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	if p.shadowTLSConfig != nil {
@@ -206,11 +210,12 @@ func (p *TCPProxy) handleMySQLSSLUpgrade(clientConn net.Conn, primaryConn net.Co
 		respType := byte(0)
 		if len(authResponse) > 4 {
 			respType = authResponse[4]
-			if respType == 0xFF {
+			switch respType {
+			case 0xFF:
 				log.Printf("handleMySQLSSLUpgrade: got ERROR response from primary")
-			} else if respType == 0x00 {
+			case 0x00:
 				debugf(p.config, "handleMySQLSSLUpgrade: got OK response from primary")
-			} else if respType == 0xFE {
+			case 0xFE:
 				debugf(p.config, "handleMySQLSSLUpgrade: got auth switch request from primary")
 			}
 		}
@@ -493,18 +498,17 @@ func (p *TCPProxy) authenticateWithShadow(shadowConn net.Conn) (net.Conn, error)
 	// Check response type (offset 4 is the packet type)
 	if len(response) > 4 {
 		respType := response[4]
-		if respType == 0xFF {
-			// Error packet - extract error message
+		switch respType {
+		case 0xFF:
 			errMsg := "unknown error"
 			if len(response) > 13 {
 				errMsg = string(response[13:])
 			}
 			authFailures.WithLabelValues("shadow").Inc()
 			return nil, fmt.Errorf("shadow auth failed: %s", errMsg)
-		} else if respType == 0x00 {
+		case 0x00:
 			debugf(p.config, "authenticateWithShadow: shadow auth successful (OK packet, tls=%v)", p.shadowTLSConfig != nil)
-		} else if respType == 0xFE {
-			// Auth switch request - for simplicity, we'll fail
+		case 0xFE:
 			authFailures.WithLabelValues("shadow").Inc()
 			return nil, fmt.Errorf("shadow requested auth switch, not supported")
 		}

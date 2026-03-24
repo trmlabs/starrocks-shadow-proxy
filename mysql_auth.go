@@ -59,10 +59,10 @@ func removeUnsupportedCapabilities(packet []byte) []byte {
 	capHigh := binary.LittleEndian.Uint16(modified[6:8])
 
 	// Remove CLIENT_SSL (bit in low bytes)
-	capLow = capLow &^ uint16(clientSSL&0xFFFF)
+	capLow &^= uint16(clientSSL & 0xFFFF)
 
 	// Remove CLIENT_DEPRECATE_EOF (bit in high bytes)
-	capHigh = capHigh &^ uint16((clientDeprecateEOF>>16)&0xFFFF)
+	capHigh &^= uint16((clientDeprecateEOF >> 16) & 0xFFFF)
 
 	// Write back
 	binary.LittleEndian.PutUint16(modified[4:6], capLow)
