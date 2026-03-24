@@ -194,7 +194,7 @@ func main() {
 	}()
 
 	if err := proxy.Start(ctx, queryLogger); err != nil {
-		log.Println(err)
-		os.Exit(1)
+		cancel()
+		log.Fatal(err) //nolint:gocritic // cancel() called explicitly above
 	}
 }
