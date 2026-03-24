@@ -1,0 +1,25 @@
+.github/workflows/release.yml
+  c04f5088f7060f16 14
+.github/workflows/ci.yml
+  c04f5088f7060f16 14,26,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "c5b30042ce7b143c93a2ad00e645fa7a412aa2c6",
+  "prompts": {
+    "c04f5088f7060f16": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f5f2d64d-57b6-475d-8995-aeb674e5334e",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 5,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
