@@ -1,0 +1,23 @@
+proxy_test.go
+  c07a0e279b66aa73 677
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "4b35416ea78b7fa4b2e3e78ac0ba3a8328268f8d",
+  "prompts": {
+    "c07a0e279b66aa73": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "35dab28a-0664-4a57-beb2-e80410193333",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
