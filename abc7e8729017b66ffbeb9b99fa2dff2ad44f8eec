@@ -1,0 +1,72 @@
+query_logger.go
+  c07a0e279b66aa73 102-115
+proxy.go
+  c07a0e279b66aa73 23-24,611-616,618-632,634-636,702-726
+monitoring/prometheus-alerts.yml
+  c07a0e279b66aa73 1-83
+query_filter.go
+  c07a0e279b66aa73 1-450
+README.md
+  c07a0e279b66aa73 326-328,452-502,518
+monitoring/prometheus.yml
+  c07a0e279b66aa73 8-10
+main.go
+  c07a0e279b66aa73 156-166,172
+query_filter_test.go
+  791ac35dc0a67316 619,818,828,838,1325,1340,1358,1367,1387,1421,1436,1490,1535,1541,1547,2240,2263,2274,2358,2369,2382,2398,2404
+  c07a0e279b66aa73 1-618,620-817,819-827,829-837,839-1324,1326-1339,1341-1357,1359-1366,1368-1386,1388-1420,1422-1435,1437-1489,1491-1534,1536-1540,1542-1546,1548-2239,2241-2262,2264-2273,2275-2357,2359-2368,2370-2381,2383-2397,2399-2403,2405-2908
+docs/usage-patterns.md
+  c07a0e279b66aa73 25-27,95-163,203-229
+minikube/primary/shadow-proxy.yaml
+  c07a0e279b66aa73 21-25
+metrics.go
+  c07a0e279b66aa73 128-135,201-202
+config.go
+  c07a0e279b66aa73 9,43-47,93-97,119-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "abc7e8729017b66ffbeb9b99fa2dff2ad44f8eec",
+  "prompts": {
+    "791ac35dc0a67316": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d4cef5ad-0061-460e-8da0-85e76dbf37db",
+        "model": "composer-2"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 23,
+      "total_deletions": 23,
+      "accepted_lines": 23,
+      "overriden_lines": 0
+    },
+    "b1719f50db1792a7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b3c54f1-6011-46ee-bb38-8700de29b289",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 235,
+      "total_deletions": 0,
+      "accepted_lines": 235,
+      "overriden_lines": 0
+    },
+    "c07a0e279b66aa73": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "35dab28a-0664-4a57-beb2-e80410193333",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Vijay <vijay@trmlabs.com>",
+      "messages": [],
+      "total_additions": 3782,
+      "total_deletions": 77,
+      "accepted_lines": 3710,
+      "overriden_lines": 0
+    }
+  }
+}
