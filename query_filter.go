@@ -81,7 +81,7 @@ func NewQueryFilter(config *Config) (*QueryFilter, error) {
 
 // Filter reason constants returned by Allow() when a query is blocked.
 const (
-	FilterReasonNone         = ""             // Query is allowed
+	FilterReasonNone         = ""              // Query is allowed
 	FilterReasonSQLOperation = "sql_operation" // Blocked by SQL operation type filter
 	FilterReasonPattern      = "pattern"       // Blocked by regex pattern filter
 	FilterReasonSampling     = "sampling"      // Dropped by random sampling

@@ -674,7 +674,7 @@ func TestProxyWithMockServers(t *testing.T) {
 	}
 
 	// Allow time for async shadow mirroring to complete (CI runners can be slow)
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 50; i++ {
 		if len(shadowServer.Received()) > 0 {
 			break
 		}

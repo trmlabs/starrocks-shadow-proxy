@@ -575,10 +575,10 @@ func TestQueryFilter_ExcludeByPattern(t *testing.T) {
 
 func TestQueryFilter_CombinedOperationAndPattern(t *testing.T) {
 	f, err := NewQueryFilter(&Config{
-		ShadowFilterMode:            "include",
-		ShadowFilterSQLOperations:   []string{"SELECT"},
-		ShadowFilterPatterns:        []string{`analytics\.`},
-		ShadowSampleRate:            1.0,
+		ShadowFilterMode:          "include",
+		ShadowFilterSQLOperations: []string{"SELECT"},
+		ShadowFilterPatterns:      []string{`analytics\.`},
+		ShadowSampleRate:          1.0,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -863,21 +863,21 @@ func TestProxyWithQueryFilter_IntegrationSelectOnly(t *testing.T) {
 	shadowParts := strings.Split(shadowServer.Addr(), ":")
 
 	config := &Config{
-		ListenAddr:          "127.0.0.1:0",
-		PrimaryHost:         primaryParts[0],
-		PrimaryPort:         primaryParts[1],
-		PrimaryUser:         "root",
-		PrimaryPassword:     "",
-		ShadowHost:          shadowParts[0],
-		ShadowPort:          shadowParts[1],
-		ShadowUser:          "root",
-		ShadowPassword:      "",
-		ShadowQueueSize:     100,
-		ShadowReadTimeout:   5 * time.Second,
-		ShadowDrainTimeout:  500 * time.Millisecond,
-		ShadowFilterMode:    "include",
+		ListenAddr:                "127.0.0.1:0",
+		PrimaryHost:               primaryParts[0],
+		PrimaryPort:               primaryParts[1],
+		PrimaryUser:               "root",
+		PrimaryPassword:           "",
+		ShadowHost:                shadowParts[0],
+		ShadowPort:                shadowParts[1],
+		ShadowUser:                "root",
+		ShadowPassword:            "",
+		ShadowQueueSize:           100,
+		ShadowReadTimeout:         5 * time.Second,
+		ShadowDrainTimeout:        500 * time.Millisecond,
+		ShadowFilterMode:          "include",
 		ShadowFilterSQLOperations: []string{"SELECT"},
-		ShadowSampleRate:    1.0,
+		ShadowSampleRate:          1.0,
 	}
 
 	proxy, err := NewTCPProxy(config)
@@ -973,21 +973,21 @@ func TestProxyWithQueryFilter_IntegrationExcludePattern(t *testing.T) {
 	shadowParts := strings.Split(shadowServer.Addr(), ":")
 
 	config := &Config{
-		ListenAddr:          "127.0.0.1:0",
-		PrimaryHost:         primaryParts[0],
-		PrimaryPort:         primaryParts[1],
-		PrimaryUser:         "root",
-		PrimaryPassword:     "",
-		ShadowHost:          shadowParts[0],
-		ShadowPort:          shadowParts[1],
-		ShadowUser:          "root",
-		ShadowPassword:      "",
-		ShadowQueueSize:     100,
-		ShadowReadTimeout:   5 * time.Second,
-		ShadowDrainTimeout:  500 * time.Millisecond,
-		ShadowFilterMode:    "exclude",
+		ListenAddr:           "127.0.0.1:0",
+		PrimaryHost:          primaryParts[0],
+		PrimaryPort:          primaryParts[1],
+		PrimaryUser:          "root",
+		PrimaryPassword:      "",
+		ShadowHost:           shadowParts[0],
+		ShadowPort:           shadowParts[1],
+		ShadowUser:           "root",
+		ShadowPassword:       "",
+		ShadowQueueSize:      100,
+		ShadowReadTimeout:    5 * time.Second,
+		ShadowDrainTimeout:   500 * time.Millisecond,
+		ShadowFilterMode:     "exclude",
 		ShadowFilterPatterns: []string{`(?i)information_schema`},
-		ShadowSampleRate:    1.0,
+		ShadowSampleRate:     1.0,
 	}
 
 	proxy, err := NewTCPProxy(config)
@@ -2193,9 +2193,9 @@ WHERE custom_entity_uuid = 'entity-abc-123' AND org_uuid = 'org-uuid-456';
 
 func TestRealWorldQueries_OperationDetection(t *testing.T) {
 	tests := []struct {
-		name      string
-		query     string
-		expected  string
+		name     string
+		query    string
+		expected string
 	}{
 		{"counterparty_flows_INSERT_OVERWRITE", realWorldQuery1_CounterpartyFlows, "INSERT_OVERWRITE"},
 		{"ownership_flows_INSERT_OVERWRITE", realWorldQuery2_OwnershipFlows, "INSERT_OVERWRITE"},

@@ -41,10 +41,10 @@ type Config struct {
 	QueryLogBatchSize     int           // Max entries before forced flush
 	QueryLogBufferSize    int           // In-memory buffer size
 	// Shadow query filtering (selective mirroring)
-	ShadowFilterMode            string   // "include" or "exclude" (empty = disabled, shadow everything)
-	ShadowFilterSQLOperations   []string // SQL operation types to filter: SELECT, INSERT_OVERWRITE, SUBMIT_TASK, etc.
-	ShadowFilterPatterns        []string // Regex patterns matched against full query text
-	ShadowSampleRate            float64  // 0.0 to 1.0 — fraction of queries to shadow (1.0 = all)
+	ShadowFilterMode          string   // "include" or "exclude" (empty = disabled, shadow everything)
+	ShadowFilterSQLOperations []string // SQL operation types to filter: SELECT, INSERT_OVERWRITE, SUBMIT_TASK, etc.
+	ShadowFilterPatterns      []string // Regex patterns matched against full query text
+	ShadowSampleRate          float64  // 0.0 to 1.0 — fraction of queries to shadow (1.0 = all)
 	// Debug logging
 	DebugLog bool // Enable verbose per-connection trace logging (DEBUG_LOG=true)
 }
@@ -91,10 +91,10 @@ func loadConfig() *Config {
 		QueryLogBatchSize:     getEnvInt("QUERY_LOG_BATCH_SIZE", 1000),                                         // Larger batches = fewer files
 		QueryLogBufferSize:    getEnvInt("QUERY_LOG_BUFFER_SIZE", 10000),
 		// Shadow query filtering (selective mirroring)
-		ShadowFilterMode:            getEnv("SHADOW_FILTER_MODE", ""),
-		ShadowFilterSQLOperations:   getEnvList("SHADOW_FILTER_SQL_OPERATIONS", nil),
-		ShadowFilterPatterns:        getEnvList("SHADOW_FILTER_PATTERNS", nil),
-		ShadowSampleRate:            getEnvFloat("SHADOW_SAMPLE_RATE", 1.0),
+		ShadowFilterMode:          getEnv("SHADOW_FILTER_MODE", ""),
+		ShadowFilterSQLOperations: getEnvList("SHADOW_FILTER_SQL_OPERATIONS", nil),
+		ShadowFilterPatterns:      getEnvList("SHADOW_FILTER_PATTERNS", nil),
+		ShadowSampleRate:          getEnvFloat("SHADOW_SAMPLE_RATE", 1.0),
 		// Debug logging (off by default; enable with DEBUG_LOG=true for per-connection traces)
 		DebugLog: getEnv("DEBUG_LOG", "false") == "true",
 	}
