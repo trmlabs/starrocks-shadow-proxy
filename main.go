@@ -153,11 +153,23 @@ func main() {
 		}
 	}()
 
+	// Create query filter for selective shadow mirroring
+	queryFilter, err := NewQueryFilter(config)
+	if err != nil {
+		log.Fatalf("Failed to create query filter: %v", err)
+	}
+	if queryFilter != nil {
+		log.Printf("  Shadow Query Filter: %s", queryFilter)
+	} else {
+		log.Printf("  Shadow Query Filter: disabled (mirroring all queries)")
+	}
+
 	// Create and start proxy
 	proxy, err := NewTCPProxy(config)
 	if err != nil {
 		log.Fatalf("Failed to create proxy: %v", err)
 	}
+	proxy.queryFilter = queryFilter
 
 	// Initialize query logger if GCS bucket is configured
 	var queryLogger *QueryLogger

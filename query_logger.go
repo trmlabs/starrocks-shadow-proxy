@@ -99,18 +99,20 @@ func registerQueryLoggerMetrics() {
 
 // QueryLogEntry represents a single query execution record for BigQuery analysis
 type QueryLogEntry struct {
-	Timestamp  string  `json:"ts"`                    // ISO8601 timestamp
-	QueryID    string  `json:"query_id"`              // UUID for primary/shadow correlation
-	Target     string  `json:"target"`                // "primary" or "shadow"
-	Command    string  `json:"command"`               // COM_QUERY, COM_PING, etc.
-	QueryText  string  `json:"query_text,omitempty"`  // Full query text (only for COM_QUERY)
-	QueryHash  string  `json:"query_hash,omitempty"`  // MD5 hash of query text for joining with FE profiles
-	DurationMs float64 `json:"duration_ms"`           // Execution time in milliseconds
-	BytesSent  int64   `json:"bytes_sent"`            // Bytes sent to target
-	BytesRecv  int64   `json:"bytes_recv"`            // Bytes received from target
-	Success    bool    `json:"success"`               // Whether execution succeeded
-	Error      string  `json:"error,omitempty"`       // Error message if failed
-	ClientAddr string  `json:"client_addr,omitempty"` // Client IP address
+	Timestamp    string  `json:"ts"`                       // ISO8601 timestamp
+	QueryID      string  `json:"query_id"`                 // UUID for primary/shadow correlation
+	Target       string  `json:"target"`                   // "primary" or "shadow"
+	Command      string  `json:"command"`                  // COM_QUERY, COM_PING, etc.
+	QueryText    string  `json:"query_text,omitempty"`     // Full query text (only for COM_QUERY)
+	QueryHash    string  `json:"query_hash,omitempty"`     // MD5 hash of query text for joining with FE profiles
+	DurationMs   float64 `json:"duration_ms"`              // Execution time in milliseconds
+	BytesSent    int64   `json:"bytes_sent"`               // Bytes sent to target
+	BytesRecv    int64   `json:"bytes_recv"`               // Bytes received from target
+	Success      bool    `json:"success"`                  // Whether execution succeeded
+	Error        string  `json:"error,omitempty"`          // Error message if failed
+	ClientAddr   string  `json:"client_addr,omitempty"`    // Client IP address
+	Filtered     bool    `json:"filtered,omitempty"`       // True if query was filtered from shadow mirroring
+	FilterReason string  `json:"filter_reason,omitempty"`  // Why filtered: "sql_operation", "pattern", "sampling"
 }
 
 // QueryRequest contains the packet plus metadata for logging correlation.

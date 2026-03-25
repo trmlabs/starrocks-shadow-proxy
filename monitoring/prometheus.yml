@@ -5,6 +5,9 @@ global:
   scrape_interval: 5s
   evaluation_interval: 5s
 
+rule_files:
+  - "prometheus-alerts.yml"
+
 scrape_configs:
   # Shadow Proxy metrics
   - job_name: 'shadow-proxy'

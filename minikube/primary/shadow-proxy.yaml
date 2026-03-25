@@ -18,6 +18,11 @@ data:
   TLS_ENABLED: "true"
   TLS_CERT_FILE: "/certs/tls.crt"
   TLS_KEY_FILE: "/certs/tls.key"
+  # Shadow query filtering (optional - uncomment to enable selective mirroring)
+  # SHADOW_FILTER_MODE: "exclude"                                    # "include" or "exclude"
+  # SHADOW_FILTER_SQL_OPERATIONS: "INSERT_OVERWRITE,SUBMIT_TASK"     # Comma-separated operation types
+  # SHADOW_FILTER_PATTERNS: ""                                       # Comma-separated regex patterns
+  # SHADOW_SAMPLE_RATE: "1.0"                                        # 0.0-1.0 (1.0 = no sampling)
 ---
 apiVersion: apps/v1
 kind: Deployment
