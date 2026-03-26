@@ -538,8 +538,13 @@ make test-coverage
 ```bash
 docker compose -f docker-compose.local.yaml up --build
 
-# Test connection
-mysql -h 127.0.0.1 -P 3306 -u root -e "SELECT 1"
+# Run basic connectivity tests
+./test-local.sh
+
+# Run filter integration tests (4 phases: baseline, operation, pattern, include)
+./test-filter-integration.sh
+# or:
+make test-filter
 ```
 
 ### Local Testing (with TLS)
