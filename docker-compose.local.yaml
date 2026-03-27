@@ -134,6 +134,12 @@ services:
       - SHADOW_PASSWORD=
       - LISTEN_ADDR=:3306
       - METRICS_PORT=:9090
+      # Uncomment to test selective query filtering:
+      # - SHADOW_FILTER_MODE=exclude
+      # - SHADOW_FILTER_SQL_OPERATIONS=INSERT_OVERWRITE,SUBMIT_TASK
+      # - SHADOW_FILTER_PATTERNS=
+      # - SHADOW_SAMPLE_RATE=1.0
+      # - DEBUG_LOG=true
     depends_on:
       primary-fe:
         condition: service_healthy
@@ -157,6 +163,7 @@ services:
       - "9091:9090"   # Prometheus UI
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus-alerts.yml:/etc/prometheus/prometheus-alerts.yml:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'

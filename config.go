@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,11 @@ type Config struct {
 	QueryLogFlushInterval time.Duration // How often to flush logs to GCS
 	QueryLogBatchSize     int           // Max entries before forced flush
 	QueryLogBufferSize    int           // In-memory buffer size
+	// Shadow query filtering (selective mirroring)
+	ShadowFilterMode          string   // "include" or "exclude" (empty = disabled, shadow everything)
+	ShadowFilterSQLOperations []string // SQL operation types to filter: SELECT, INSERT_OVERWRITE, SUBMIT_TASK, etc.
+	ShadowFilterPatterns      []string // Regex patterns matched against full query text
+	ShadowSampleRate          float64  // 0.0 to 1.0 — fraction of queries to shadow (1.0 = all)
 	// Debug logging
 	DebugLog bool // Enable verbose per-connection trace logging (DEBUG_LOG=true)
 }
@@ -84,6 +90,11 @@ func loadConfig() *Config {
 		QueryLogFlushInterval: time.Duration(getEnvInt("QUERY_LOG_FLUSH_INTERVAL_SECONDS", 120)) * time.Second, // 2 min default
 		QueryLogBatchSize:     getEnvInt("QUERY_LOG_BATCH_SIZE", 1000),                                         // Larger batches = fewer files
 		QueryLogBufferSize:    getEnvInt("QUERY_LOG_BUFFER_SIZE", 10000),
+		// Shadow query filtering (selective mirroring)
+		ShadowFilterMode:          getEnv("SHADOW_FILTER_MODE", ""),
+		ShadowFilterSQLOperations: getEnvList("SHADOW_FILTER_SQL_OPERATIONS", nil),
+		ShadowFilterPatterns:      getEnvList("SHADOW_FILTER_PATTERNS", nil),
+		ShadowSampleRate:          getEnvFloat("SHADOW_SAMPLE_RATE", 1.0),
 		// Debug logging (off by default; enable with DEBUG_LOG=true for per-connection traces)
 		DebugLog: getEnv("DEBUG_LOG", "false") == "true",
 	}
@@ -104,4 +115,35 @@ func getEnvInt(key string, defaultValue int) int {
 		log.Printf("Warning: invalid integer value for %s: %s, using default %d", key, value, defaultValue)
 	}
 	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatVal
+		}
+		log.Printf("Warning: invalid float value for %s: %s, using default %f", key, value, defaultValue)
+	}
+	return defaultValue
+}
+
+// getEnvList reads a comma-separated environment variable into a string slice.
+// Returns defaultValue if the variable is not set or empty.
+func getEnvList(key string, defaultValue []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	parts := strings.Split(value, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return defaultValue
+	}
+	return result
 }

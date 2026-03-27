@@ -1,0 +1,83 @@
+# Prometheus alerting rules for StarRocks shadow proxy
+# Load via rule_files in prometheus.yml
+
+groups:
+  - name: shadow_proxy_alerts
+    rules:
+      # Shadow is receiving no queries while primary is active
+      - alert: ShadowProxyNoShadowQueries
+        expr: >
+          sum(rate(shadow_proxy_queries_total{target="primary"}[5m])) > 0.1
+          and
+          sum(rate(shadow_proxy_queries_total{target="shadow"}[5m])) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shadow proxy receiving no shadow queries"
+          description: >
+            Primary is processing {{ $value | printf "%.1f" }} qps but shadow
+            has received zero queries for 5 minutes. Check if the shadow cluster
+            is down, the filter is misconfigured (SHADOW_FILTER_MODE), or all
+            queries are being filtered/dropped.
+
+      # Filtered query rate suddenly spiked (possible misconfiguration)
+      - alert: ShadowProxyHighFilterRate
+        expr: >
+          (
+            sum(rate(shadow_proxy_shadow_filtered_total[5m]))
+            /
+            clamp_min(sum(rate(shadow_proxy_queries_total{target="primary"}[5m])), 0.001)
+          ) > 0.95
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shadow proxy filtering >95% of queries"
+          description: >
+            {{ $value | printf "%.1f" }}% of primary queries are being filtered
+            from shadow for 10+ minutes. This may indicate a filter
+            misconfiguration. Check SHADOW_FILTER_MODE, SHADOW_FILTER_SQL_OPERATIONS,
+            SHADOW_FILTER_PATTERNS, and SHADOW_SAMPLE_RATE.
+
+      # Queue drops indicate shadow can't keep up
+      - alert: ShadowProxyQueueDrops
+        expr: rate(shadow_proxy_queue_drops_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shadow proxy dropping queries from queue"
+          description: >
+            Shadow queue is full — {{ $value | printf "%.1f" }} drops/sec.
+            The shadow cluster may be too slow or SHADOW_QUEUE_SIZE too small.
+
+      # Shadow read timeouts indicate slow shadow queries
+      - alert: ShadowProxyReadTimeouts
+        expr: rate(shadow_proxy_read_timeouts_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shadow proxy experiencing read timeouts"
+          description: >
+            {{ $value | printf "%.3f" }} shadow read timeouts/sec. Shadow queries
+            are exceeding SHADOW_READ_TIMEOUT_SECONDS (default 30s).
+
+      # Query parity check: accounting for filtered + dropped queries
+      - alert: ShadowProxyQueryParityDrift
+        expr: >
+          abs(
+            sum(shadow_proxy_queries_total{target="primary"})
+            - sum(shadow_proxy_queries_total{target="shadow"})
+            - sum(shadow_proxy_shadow_filtered_total)
+            - sum(shadow_proxy_queue_drops_total)
+          ) > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shadow proxy query count parity drift"
+          description: >
+            Primary - Shadow - Filtered - Dropped = {{ $value | printf "%.0f" }}
+            (expected ~0). This may indicate queries being lost in transit.

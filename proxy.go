@@ -20,7 +20,8 @@ type TCPProxy struct {
 	primaryAddr     string
 	shadowAddr      string
 	tlsConfig       *tls.Config
-	shadowTLSConfig *tls.Config // TLS config for shadow connections (proxy as client)
+	shadowTLSConfig *tls.Config  // TLS config for shadow connections (proxy as client)
+	queryFilter     *QueryFilter // Optional filter for selective shadow mirroring (nil = mirror all)
 }
 
 // NewTCPProxy creates a TCP-level proxy with optional TLS support
@@ -607,20 +608,32 @@ func (p *TCPProxy) proxyWithMirrorWorker(client, primary net.Conn, shadowWorker 
 		// COM_STMT_CLOSE the shadow leaks open statements. The shadow worker already
 		// handles these correctly (writes the packet, skips reading a response).
 		if cmd != comQuit {
-			shadowReq := QueryRequest{
-				ID:         req.ID, // Same ID for correlation!
-				Packet:     make([]byte, len(packet)),
-				QueryText:  req.QueryText,
-				QueryHash:  req.QueryHash,
-				Command:    req.Command,
-				ClientAddr: req.ClientAddr,
-				ReceivedAt: req.ReceivedAt,
+			// Check if the query filter allows this request to be shadowed.
+			// The filter only applies to COM_QUERY; other commands (COM_INIT_DB,
+			// COM_STMT_PREPARE, etc.) always pass through to keep shadow in sync.
+			allowed, filterReason := true, ""
+			if p.queryFilter != nil {
+				allowed, filterReason = p.queryFilter.Allow(req)
 			}
-			copy(shadowReq.Packet, packet)
+			if !allowed {
+				shadowFilteredTotal.WithLabelValues(filterReason).Inc()
+				debugf(p.config, "Query filtered from shadow (%s): %s %s", filterReason, req.Command, extractQueryPreview(packet, 100))
+				p.logFilteredShadow(logger, req, filterReason)
+			} else {
+				shadowReq := QueryRequest{
+					ID:         req.ID, // Same ID for correlation!
+					Packet:     make([]byte, len(packet)),
+					QueryText:  req.QueryText,
+					QueryHash:  req.QueryHash,
+					Command:    req.Command,
+					ClientAddr: req.ClientAddr,
+					ReceivedAt: req.ReceivedAt,
+				}
+				copy(shadowReq.Packet, packet)
 
-			if !shadowWorker.Send(shadowReq) {
-				// Queue is full, request was dropped (metric already incremented by Send())
-				debugf(p.config, "Shadow queue full, dropping mirrored command: %s", getMySQLCommandName(cmd))
+				if !shadowWorker.Send(shadowReq) {
+					debugf(p.config, "Shadow queue full, dropping mirrored command: %s", getMySQLCommandName(cmd))
+				}
 			}
 		}
 
@@ -683,6 +696,31 @@ func (p *TCPProxy) logPrimaryExecution(logger *QueryLogger, req QueryRequest, by
 		Success:    err == nil,
 		Error:      errorString(err),
 		ClientAddr: req.ClientAddr,
+	})
+}
+
+// logFilteredShadow logs a shadow entry for a query that was filtered (not mirrored).
+// This ensures every primary log entry has a corresponding shadow entry in GCS,
+// making it easy to identify filtered queries in BigQuery analysis.
+func (p *TCPProxy) logFilteredShadow(logger *QueryLogger, req QueryRequest, filterReason string) {
+	if logger == nil {
+		return
+	}
+
+	logger.Log(QueryLogEntry{
+		Timestamp:    time.Now().UTC().Format(time.RFC3339Nano),
+		QueryID:      req.ID,
+		Target:       "shadow",
+		Command:      req.Command,
+		QueryText:    req.QueryText,
+		QueryHash:    req.QueryHash,
+		DurationMs:   0,
+		BytesSent:    0,
+		BytesRecv:    0,
+		Success:      true,
+		ClientAddr:   req.ClientAddr,
+		Filtered:     true,
+		FilterReason: filterReason,
 	})
 }
 

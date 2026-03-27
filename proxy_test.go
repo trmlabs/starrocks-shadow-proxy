@@ -605,6 +605,7 @@ func TestProxyWithMockServers(t *testing.T) {
 		ShadowPort:         shadowParts[1],
 		ShadowUser:         "shadowuser",
 		ShadowPassword:     "shadowpass",
+		ShadowQueueSize:    100,
 		ShadowReadTimeout:  30 * time.Second,
 		ShadowDrainTimeout: 500 * time.Millisecond,
 	}
@@ -674,7 +675,7 @@ func TestProxyWithMockServers(t *testing.T) {
 	}
 
 	// Allow time for async shadow mirroring to complete (CI runners can be slow)
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 50; i++ {
 		if len(shadowServer.Received()) > 0 {
 			break
 		}
@@ -717,6 +718,7 @@ func TestShadowAuthenticationWithCorrectCredentials(t *testing.T) {
 		ShadowPort:         shadowParts[1],
 		ShadowUser:         "shadowuser",
 		ShadowPassword:     "shadowpass",
+		ShadowQueueSize:    100,
 		ShadowReadTimeout:  30 * time.Second,
 		ShadowDrainTimeout: 500 * time.Millisecond,
 	}
@@ -1042,6 +1044,7 @@ func TestConcurrentConnections(t *testing.T) {
 		ShadowPort:         shadowParts[1],
 		ShadowUser:         "shadowuser",
 		ShadowPassword:     "shadowpass",
+		ShadowQueueSize:    100,
 		ShadowReadTimeout:  30 * time.Second,
 		ShadowDrainTimeout: 500 * time.Millisecond,
 	}

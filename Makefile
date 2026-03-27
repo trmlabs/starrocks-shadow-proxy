@@ -62,6 +62,13 @@ test-integration:
 	@echo "Tests passed!"
 	docker-compose -f docker-compose.test.yaml down -v
 
+# Filter integration test — tests selective query filtering against real StarRocks
+# Runs 4 phases: baseline, operation filter, pattern filter, include-only
+# Requires: shadow-proxy:local-filter Docker image (build with make docker-build)
+test-filter:
+	@echo "Running filter integration tests (real StarRocks)..."
+	./test-filter-integration.sh
+
 # Docker build (multi-stage: builds Go binary inside Docker)
 docker-build:
 	docker build -t $(IMAGE_NAME):$(VERSION) .
@@ -111,6 +118,7 @@ help:
 	@echo "  test-local         - Start local test environment"
 	@echo "  test-local-down    - Stop local test environment"
 	@echo "  test-integration   - Run full integration test"
+	@echo "  test-filter        - Run filter integration test (Docker)"
 	@echo "  docker-build       - Build Linux binary + Docker image (amd64)"
 	@echo "  docker-build-arm64 - Build Linux binary + Docker image (arm64)"
 	@echo "  docker-release     - Build and push Docker image (amd64)"

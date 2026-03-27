@@ -323,7 +323,9 @@ CREATE EXTERNAL TABLE `project.dataset.query_logs`
   success BOOL,
   error STRING,
   client_addr STRING,
-  query_hash STRING
+  query_hash STRING,
+  filtered BOOL,
+  filter_reason STRING
 )
 WITH PARTITION COLUMNS (
   year STRING,
@@ -447,6 +449,57 @@ QUERY_LOG_BATCH_SIZE=1000
 
 **Note**: Logs are flushed when either the batch size is reached OR the flush interval elapses, whichever comes first. This ensures low-latency logging during busy periods while still flushing during quiet periods.
 
+### Shadow Query Filtering (Selective Mirroring)
+
+By default, every `COM_QUERY` is mirrored to the shadow cluster. You can selectively control which queries get shadowed using **include** (allowlist) or **exclude** (blocklist) rules, optional **regex** patterns on full SQL text, and optional **random sampling**.
+
+Only `COM_QUERY` commands are filtered. Other MySQL commands (`COM_INIT_DB`, `COM_STMT_PREPARE`, etc.) are always forwarded to keep the shadow session synchronized.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SHADOW_FILTER_MODE` | `include` or `exclude`. If unset, filtering is disabled (mirror all). | (disabled) |
+| `SHADOW_FILTER_SQL_OPERATIONS` | Comma-separated SQL operation types to filter. StarRocks-aware: `SELECT`, `INSERT_OVERWRITE`, `SUBMIT_TASK`, `CREATE_MATERIALIZED_VIEW`, etc. For multi-statement queries (`SET CATALOG..; USE..; INSERT OVERWRITE..`), the primary (last non-preamble) operation is detected. | (empty) |
+| `SHADOW_FILTER_PATTERNS` | Comma-separated Go regex patterns matched against the full query text. | (empty) |
+| `SHADOW_SAMPLE_RATE` | Fraction of queries (that pass other filters) to actually shadow. `0.0`–`1.0`. | `1.0` |
+
+**Filter logic:**
+- **Include mode**: query must match ALL configured criteria (operations AND patterns). Within each, OR logic applies (match any one operation or any one pattern).
+- **Exclude mode**: query is blocked if it matches ANY criterion (operations OR patterns).
+- **Sampling** is applied last, after other filters pass.
+
+**Examples:**
+
+```bash
+# Only shadow SELECT queries
+SHADOW_FILTER_MODE=include
+SHADOW_FILTER_SQL_OPERATIONS=SELECT
+
+# Shadow everything except heavy ETL writes
+SHADOW_FILTER_MODE=exclude
+SHADOW_FILTER_SQL_OPERATIONS=INSERT_OVERWRITE,SUBMIT_TASK
+
+# Only shadow queries touching analytics tables
+SHADOW_FILTER_MODE=include
+SHADOW_FILTER_PATTERNS=analytics\.,risk_indicators
+
+# Exclude system catalog queries
+SHADOW_FILTER_MODE=exclude
+SHADOW_FILTER_PATTERNS=(?i)information_schema,(?i)__internal
+
+# Shadow 10% of all queries (load testing)
+SHADOW_SAMPLE_RATE=0.1
+
+# Combine: only SELECT on analytics at 50% sample rate
+SHADOW_FILTER_MODE=include
+SHADOW_FILTER_SQL_OPERATIONS=SELECT
+SHADOW_FILTER_PATTERNS=analytics\.
+SHADOW_SAMPLE_RATE=0.5
+```
+
+**Metrics**: `shadow_proxy_shadow_filtered_total{reason="sql_operation|pattern|sampling"}` — counter of queries filtered from shadow, broken down by reason.
+
+**GCS Logging**: When query logging is enabled, filtered queries are logged with `target=shadow`, `filtered=true`, and `filter_reason` so every primary entry has a corresponding shadow entry for BigQuery correlation analysis.
+
 ## Development
 
 ### Project Structure
@@ -462,6 +515,7 @@ The source is split into focused files within a single `package main`:
 | `mysql_auth.go` | SSL/TLS detection, handshake modification, scramble extraction, native password |
 | `shadow_worker.go` | `ShadowWorker` — per-client queue, async mirroring, graceful drain |
 | `proxy.go` | `TCPProxy` — connection handling, SSL upgrade, auth, bidirectional proxying |
+| `query_filter.go` | Selective query filtering — StarRocks-aware SQL operation detection, regex matching, sampling |
 | `query_logger.go` | Async batched query logging to GCS (JSONL, Hive-partitioned) |
 
 Test files mirror source files (e.g. `proxy.go` → `proxy_test.go`).
@@ -484,8 +538,13 @@ make test-coverage
 ```bash
 docker compose -f docker-compose.local.yaml up --build
 
-# Test connection
-mysql -h 127.0.0.1 -P 3306 -u root -e "SELECT 1"
+# Run basic connectivity tests
+./test-local.sh
+
+# Run filter integration tests (4 phases: baseline, operation, pattern, include)
+./test-filter-integration.sh
+# or:
+make test-filter
 ```
 
 ### Local Testing (with TLS)

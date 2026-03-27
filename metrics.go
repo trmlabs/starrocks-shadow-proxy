@@ -125,6 +125,14 @@ var (
 			Help: "Total number of connections successfully mirroring to shadow",
 		},
 	)
+	// Shadow filter metrics
+	shadowFilteredTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_shadow_filtered_total",
+			Help: "Total number of queries filtered from shadow mirroring",
+		},
+		[]string{"reason"}, // "sql_operation", "pattern", "sampling"
+	)
 	// MySQL command metrics for accurate query counting
 	mysqlCommands = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -190,6 +198,8 @@ func init() {
 	prometheus.MustRegister(shadowWriteErrors)
 	prometheus.MustRegister(totalConnections)
 	prometheus.MustRegister(connectionsWithShadow)
+	// Shadow filter metrics
+	prometheus.MustRegister(shadowFilteredTotal)
 	// MySQL command metrics
 	prometheus.MustRegister(mysqlCommands)
 	prometheus.MustRegister(mysqlPackets)

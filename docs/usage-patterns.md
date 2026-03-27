@@ -22,7 +22,9 @@ CREATE EXTERNAL TABLE `your_project.your_dataset.shadow_proxy_query_logs`
   success BOOL,
   error STRING,
   client_addr STRING,
-  query_hash STRING
+  query_hash STRING,
+  filtered BOOL,
+  filter_reason STRING
 )
 WITH PARTITION COLUMNS (
   year STRING,
@@ -90,6 +92,75 @@ WHERE year = '2026' AND month = '03' AND day = '15'
 GROUP BY target;
 ```
 
+### 5. Analyze Filtered Queries
+
+When [shadow query filtering](../README.md#shadow-query-filtering-selective-mirroring) is enabled, filtered queries are logged with `filtered=true` and a `filter_reason`. This lets you audit exactly what the filter is doing.
+
+```sql
+-- Count filtered vs executed shadow queries
+SELECT
+  COALESCE(filtered, FALSE) AS was_filtered,
+  filter_reason,
+  COUNT(*) AS query_count
+FROM `your_project.your_dataset.shadow_proxy_query_logs`
+WHERE target = 'shadow'
+  AND year = '2026' AND month = '03'
+GROUP BY was_filtered, filter_reason
+ORDER BY query_count DESC;
+```
+
+```sql
+-- Find queries that were filtered — useful for verifying filter config
+SELECT
+  query_id,
+  filter_reason,
+  SUBSTR(query_text, 1, 150) AS query_preview
+FROM `your_project.your_dataset.shadow_proxy_query_logs`
+WHERE target = 'shadow'
+  AND filtered = TRUE
+  AND year = '2026' AND month = '03' AND day = '25'
+ORDER BY ts DESC
+LIMIT 50;
+```
+
+```sql
+-- Primary-shadow latency comparison, excluding filtered queries
+-- (Filtered shadow entries have duration_ms=0, so exclude them)
+SELECT
+  p.query_id,
+  SUBSTR(p.query_text, 1, 120) AS query_preview,
+  p.duration_ms AS primary_ms,
+  s.duration_ms AS shadow_ms,
+  ROUND(s.duration_ms / NULLIF(p.duration_ms, 0), 2) AS slowdown_factor
+FROM `your_project.your_dataset.shadow_proxy_query_logs` p
+JOIN `your_project.your_dataset.shadow_proxy_query_logs` s
+  ON p.query_id = s.query_id
+WHERE p.target = 'primary'
+  AND s.target = 'shadow'
+  AND s.filtered IS NOT TRUE
+  AND p.year = '2026' AND p.month = '03'
+  AND s.duration_ms > p.duration_ms * 2
+ORDER BY s.duration_ms - p.duration_ms DESC
+LIMIT 100;
+```
+
+```sql
+-- Filter effectiveness: what percentage of primary queries are being filtered?
+SELECT
+  DATE(p.ts) AS dt,
+  COUNT(*) AS total_primary_queries,
+  COUNTIF(s.filtered = TRUE) AS filtered_queries,
+  COUNTIF(s.filtered IS NOT TRUE) AS shadowed_queries,
+  ROUND(COUNTIF(s.filtered = TRUE) / COUNT(*) * 100, 1) AS filter_pct
+FROM `your_project.your_dataset.shadow_proxy_query_logs` p
+JOIN `your_project.your_dataset.shadow_proxy_query_logs` s
+  ON p.query_id = s.query_id
+WHERE p.target = 'primary' AND s.target = 'shadow'
+  AND p.year = '2026' AND p.month = '03'
+GROUP BY dt
+ORDER BY dt;
+```
+
 ## Using StarRocks Execution Profiles
 
 For queries that show significant latency differences, StarRocks execution profiles provide deeper insight.
@@ -129,5 +200,32 @@ The proxy exposes Prometheus metrics at `/metrics` (default port 9090). Key metr
 - `shadow_proxy_query_duration_seconds{target="primary|shadow"}` -- latency histograms
 - `shadow_proxy_queries_total{target="primary|shadow"}` -- query counts
 - `shadow_proxy_query_errors_total{target="primary|shadow"}` -- error counts
+- `shadow_proxy_shadow_filtered_total{reason="sql_operation|pattern|sampling"}` -- queries filtered from shadow
+
+### Filtering Metrics
+
+When [shadow query filtering](../README.md#shadow-query-filtering-selective-mirroring) is active, the relationship between metrics changes:
+
+```
+primary queries = shadow queries + filtered queries + queue drops
+```
+
+Key PromQL queries for monitoring filtering:
+
+```promql
+# Filtered query rate by reason
+sum(rate(shadow_proxy_shadow_filtered_total[5m])) by (reason)
+
+# Filter percentage (what fraction of primary queries are being filtered)
+sum(rate(shadow_proxy_shadow_filtered_total[5m]))
+/
+sum(rate(shadow_proxy_queries_total{target="primary"}[5m]))
+
+# Verify parity: this should be ~0
+sum(shadow_proxy_queries_total{target="primary"})
+- sum(shadow_proxy_queries_total{target="shadow"})
+- sum(shadow_proxy_shadow_filtered_total)
+- sum(shadow_proxy_queue_drops_total)
+```
 
 A sample Grafana dashboard is included in `monitoring/grafana/dashboards/`.
