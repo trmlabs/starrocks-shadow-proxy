@@ -1,0 +1,132 @@
+# Local testing setup for the Postgres shadow proxy.
+#
+# Usage:
+#   docker compose -f docker-compose.pg.yaml up --build
+#
+# Access:
+#   Proxy:         psql -h 127.0.0.1 -p 5432 -U postgres   (sslmode=disable required for MVP)
+#   Primary (PG15): psql -h 127.0.0.1 -p 15432 -U postgres
+#   Shadow  (PG18): psql -h 127.0.0.1 -p 25432 -U postgres
+#   Proxy metrics: http://localhost:9090/metrics
+#
+# About the database images:
+#   We use vanilla `postgres:15` and `postgres:18` images here. The pgwire
+#   protocol is identical between vanilla Postgres and AlloyDB Omni, so this
+#   exercises the proxy code paths without requiring GCP credentials. For a
+#   higher-fidelity local test that mimics AlloyDB-specific behavior (e.g.
+#   ColumnarEngine, IndexAdvisor), swap these for AlloyDB Omni images:
+#     image: gcr.io/alloydb-omni/alloydb-omni:15.x.x   # primary
+#     image: gcr.io/alloydb-omni/alloydb-omni:16.x.x   # shadow (upgrade target)
+#   AlloyDB Omni docs: https://cloud.google.com/alloydb/omni/docs
+#
+# Note (PR #1 scope):
+#   The proxy currently forwards only to the primary. The "shadow" service is
+#   defined here for the next PR (which wires up async mirroring) but the
+#   proxy ignores SHADOW_HOST until then.
+
+services:
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: pg-shadow-proxy-primary
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: trmlabs
+      POSTGRES_DB: trm
+      # AlloyDB-like config knobs for closer parity with prod.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "max_connections=200"
+    ports:
+      - "15432:5432"
+    networks:
+      - pg-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres-shadow:
+    image: postgres:18-alpine
+    container_name: pg-shadow-proxy-shadow
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: trmlabs
+      POSTGRES_DB: trm
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "max_connections=200"
+    ports:
+      - "25432:5432"
+    networks:
+      - pg-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  shadow-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pg-shadow-proxy
+    environment:
+      PROTOCOL: postgres
+      LISTEN_ADDR: ":5432"
+      METRICS_PORT: ":9090"
+
+      # Primary: where production-equivalent reads/writes go (sync path).
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: "5432"
+      PRIMARY_USER: postgres
+      PRIMARY_PASSWORD: trmlabs
+
+      # Shadow: defined for PR #2. Proxy ignores these in PR #1.
+      SHADOW_HOST: postgres-shadow
+      SHADOW_PORT: "5432"
+      SHADOW_USER: postgres
+      SHADOW_PASSWORD: trmlabs
+
+      # Optional GCS query log. Leave empty for local dev so the proxy doesn't
+      # try to authenticate to GCS. The flag is a single env var, configurable
+      # per environment.
+      QUERY_LOG_GCS_BUCKET: ""
+      QUERY_LOG_GCS_PREFIX: "pg-query-logs"
+
+      DEBUG_LOG: "true"
+    ports:
+      - "5432:5432"
+      - "9090:9090"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      postgres-shadow:
+        condition: service_healthy
+    networks:
+      - pg-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  pg-net:
+    driver: bridge

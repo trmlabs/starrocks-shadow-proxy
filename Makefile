@@ -47,6 +47,18 @@ test-local: build-linux
 test-local-down:
 	docker-compose -f docker-compose.local.yaml down -v
 
+# Start local Postgres test environment (proxy + 2 vanilla Postgres backends)
+test-pg-local:
+	./test-pg-local.sh
+
+# Start local Postgres environment without smoke-test, leaving it up for manual use
+test-pg-local-up:
+	./test-pg-local.sh --keep
+
+# Stop local Postgres test environment
+test-pg-local-down:
+	docker-compose -f docker-compose.pg.yaml down -v
+
 # Manual integration test against local environment
 test-integration:
 	@echo "Starting test environment..."
@@ -115,8 +127,11 @@ help:
 	@echo "  test               - Run all tests"
 	@echo "  bench              - Run benchmarks"
 	@echo "  test-coverage      - Run tests with coverage report"
-	@echo "  test-local         - Start local test environment"
-	@echo "  test-local-down    - Stop local test environment"
+	@echo "  test-local         - Start local test environment (StarRocks/MySQL)"
+	@echo "  test-local-down    - Stop local test environment (StarRocks/MySQL)"
+	@echo "  test-pg-local      - Run Postgres smoke test (compose up + assertions + tear down)"
+	@echo "  test-pg-local-up   - Start Postgres test environment and leave running"
+	@echo "  test-pg-local-down - Stop Postgres test environment"
 	@echo "  test-integration   - Run full integration test"
 	@echo "  test-filter        - Run filter integration test (Docker)"
 	@echo "  docker-build       - Build Linux binary + Docker image (amd64)"
