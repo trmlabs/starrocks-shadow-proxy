@@ -123,47 +123,51 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 // will be in effect for the rest of the session, or nil if the connection should
 // be closed (CancelRequest).
 //
-// SSLRequest handling: if the server agrees to SSL ('S'), we'd need to terminate
-// TLS at the proxy — out of scope for MVP. Configure clients with sslmode=disable
-// (or sslmode=prefer, which falls back gracefully).
+// libpq's default negotiation can send TWO probe messages before the
+// StartupMessage:
+//
+//   - gssencmode=prefer (default): send GSSENCRequest first.
+//   - sslmode=prefer (default):    send SSLRequest after GSSENC is declined.
+//
+// We loop on the probe messages and only stop once the server has acknowledged
+// 'N' to whichever probe was last sent and the client follows up with the real
+// StartupMessage. If the server agrees to SSL/GSS ('S'), we bail — terminating
+// TLS at the proxy is out of scope for MVP. Configure clients with
+// `sslmode=disable gssencmode=disable` to avoid those probes entirely.
 func (p *PgProxy) forwardStartup(client, primary net.Conn) (*PgPacket, error) {
-	startup, err := ReadStartupMessage(client)
-	if err != nil {
-		return nil, fmt.Errorf("read startup from client: %w", err)
-	}
-
-	if _, err := primary.Write(startup.Payload); err != nil {
-		return nil, fmt.Errorf("forward startup to primary: %w", err)
-	}
-
-	if IsSSLRequest(startup) || IsGSSENCRequest(startup) {
-		resp := make([]byte, 1)
-		if _, err := io.ReadFull(primary, resp); err != nil {
-			return nil, fmt.Errorf("read SSL/GSSENC response: %w", err)
-		}
-		if _, err := client.Write(resp); err != nil {
-			return nil, fmt.Errorf("forward SSL/GSSENC response: %w", err)
-		}
-		if resp[0] == 'S' {
-			tlsFailures.Inc()
-			return nil, fmt.Errorf("server agreed to SSL; proxy does not terminate TLS in MVP — connect with sslmode=disable")
-		}
-		// 'N' or 'E': read the StartupMessage that the client retries.
-		startup2, err := ReadStartupMessage(client)
+	for {
+		startup, err := ReadStartupMessage(client)
 		if err != nil {
-			return nil, fmt.Errorf("read startup after SSL=N: %w", err)
+			return nil, fmt.Errorf("read startup from client: %w", err)
 		}
-		if _, err := primary.Write(startup2.Payload); err != nil {
-			return nil, fmt.Errorf("forward second startup to primary: %w", err)
+
+		if _, err := primary.Write(startup.Payload); err != nil {
+			return nil, fmt.Errorf("forward startup to primary: %w", err)
 		}
-		return startup2, nil
-	}
 
-	if IsCancelRequest(startup) {
-		return nil, nil
-	}
+		if IsSSLRequest(startup) || IsGSSENCRequest(startup) {
+			resp := make([]byte, 1)
+			if _, err := io.ReadFull(primary, resp); err != nil {
+				return nil, fmt.Errorf("read SSL/GSSENC response: %w", err)
+			}
+			if _, err := client.Write(resp); err != nil {
+				return nil, fmt.Errorf("forward SSL/GSSENC response: %w", err)
+			}
+			if resp[0] == 'S' {
+				tlsFailures.Inc()
+				return nil, fmt.Errorf("server agreed to SSL/GSS; proxy does not terminate TLS in MVP — connect with sslmode=disable gssencmode=disable")
+			}
+			// 'N' or 'E' — the client may follow up with another probe (SSLRequest
+			// after GSSENC was declined) or the real StartupMessage. Loop.
+			continue
+		}
 
-	return startup, nil
+		if IsCancelRequest(startup) {
+			return nil, nil
+		}
+
+		return startup, nil
+	}
 }
 
 // forwardAuthPhase relays AuthenticationXxx ↔ PasswordMessage exchanges between
@@ -190,18 +194,24 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 			// Auth code: uint32 BE at payload[4:8].
 			code := uint32(msg.Payload[4])<<24 | uint32(msg.Payload[5])<<16 |
 				uint32(msg.Payload[6])<<8 | uint32(msg.Payload[7])
-			if code == 0 {
-				// AuthenticationOk — server will follow with ParameterStatus*, BackendKeyData, ReadyForQuery.
+			switch code {
+			case 0:
+				// AuthenticationOk — server follows with ParameterStatus*, BackendKeyData, ReadyForQuery.
 				continue
-			}
-			// CleartextPassword (3), MD5Password (5), SASL (10), SASLContinue (11), SASLFinal (12), etc.
-			// All of these expect a frontend PasswordMessage 'p' from the client.
-			pwMsg, err := ReadMessage(client)
-			if err != nil {
-				return fmt.Errorf("read password msg from client: %w", err)
-			}
-			if _, err := primary.Write(pwMsg.Bytes()); err != nil {
-				return fmt.Errorf("forward password to primary: %w", err)
+			case 12:
+				// AuthenticationSASLFinal — server-to-client only; no client response expected.
+				// The server will follow with AuthenticationOk (code 0).
+				continue
+			default:
+				// CleartextPassword (3), MD5Password (5), SASL (10), SASLContinue (11), etc.
+				// Each of these expects exactly one frontend PasswordMessage 'p' from the client.
+				pwMsg, err := ReadMessage(client)
+				if err != nil {
+					return fmt.Errorf("read password msg from client (auth code %d): %w", code, err)
+				}
+				if _, err := primary.Write(pwMsg.Bytes()); err != nil {
+					return fmt.Errorf("forward password to primary (auth code %d): %w", code, err)
+				}
 			}
 		case pgBackendReadyForQuery:
 			return nil

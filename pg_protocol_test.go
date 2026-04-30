@@ -49,7 +49,7 @@ func buildMessage(msgType byte, body []byte) []byte {
 	return out
 }
 
-func TestReadStartupMessage(t *testing.T) {
+func TestReadPgStartupMessage(t *testing.T) {
 	raw := buildStartupMsg(map[string]string{"user": "anand", "database": "trm"})
 	pkt, err := ReadStartupMessage(bytes.NewReader(raw))
 	if err != nil {
@@ -63,7 +63,7 @@ func TestReadStartupMessage(t *testing.T) {
 	}
 }
 
-func TestIsSSLRequest(t *testing.T) {
+func TestIsPgSSLRequest(t *testing.T) {
 	raw := buildSSLRequest()
 	pkt, err := ReadStartupMessage(bytes.NewReader(raw))
 	if err != nil {
@@ -77,7 +77,7 @@ func TestIsSSLRequest(t *testing.T) {
 	}
 }
 
-func TestIsCancelRequest(t *testing.T) {
+func TestIsPgCancelRequest(t *testing.T) {
 	raw := buildCancelRequest(1234, 5678)
 	pkt, err := ReadStartupMessage(bytes.NewReader(raw))
 	if err != nil {
@@ -88,7 +88,7 @@ func TestIsCancelRequest(t *testing.T) {
 	}
 }
 
-func TestReadMessage(t *testing.T) {
+func TestReadPgMessage(t *testing.T) {
 	body := append([]byte("SELECT 1"), 0)
 	raw := buildMessage(pgMsgQuery, body)
 	pkt, err := ReadMessage(bytes.NewReader(raw))
@@ -103,7 +103,7 @@ func TestReadMessage(t *testing.T) {
 	}
 }
 
-func TestReadMessageRejectsOversized(t *testing.T) {
+func TestReadPgMessageRejectsOversized(t *testing.T) {
 	// 5-byte header announcing a payload larger than pgMaxMessageSize.
 	raw := []byte{pgMsgQuery, 0xFF, 0xFF, 0xFF, 0xFF}
 	if _, err := ReadMessage(bytes.NewReader(raw)); err == nil {

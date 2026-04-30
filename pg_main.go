@@ -148,6 +148,6 @@ func runPostgresProxy(config *Config) {
 
 	if err := proxy.Start(ctx, queryLogger); err != nil {
 		cancel()
-		log.Fatal(err)
+		log.Fatal(err) //nolint:gocritic // cancel() called explicitly above
 	}
 }

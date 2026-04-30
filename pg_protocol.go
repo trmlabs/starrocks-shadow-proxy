@@ -121,19 +121,19 @@ func IsCancelRequest(p *PgPacket) bool {
 
 // pgwire frontend (client→server) message types.
 const (
-	pgMsgQuery       byte = 'Q' // simple query protocol
-	pgMsgParse       byte = 'P' // extended: parse a statement
-	pgMsgBind        byte = 'B' // extended: bind values to a parsed statement
-	pgMsgExecute     byte = 'E' // extended: execute a bound portal
-	pgMsgSync        byte = 'S' // extended: end of pipeline
-	pgMsgTerminate   byte = 'X' // close connection
-	pgMsgPasswordMsg byte = 'p' // password / SASL response
-	pgMsgClose       byte = 'C' // close (a portal/statement) — frontend-only
-	pgMsgDescribe    byte = 'D' // describe a portal/statement
-	pgMsgFlush       byte = 'H' // flush
-	pgMsgCopyData    byte = 'd' // shared (frontend & backend)
-	pgMsgCopyDone    byte = 'c' // shared
-	pgMsgCopyFail    byte = 'f' // frontend-only
+	pgMsgQuery        byte = 'Q' // simple query protocol
+	pgMsgParse        byte = 'P' // extended: parse a statement
+	pgMsgBind         byte = 'B' // extended: bind values to a parsed statement
+	pgMsgExecute      byte = 'E' // extended: execute a bound portal
+	pgMsgSync         byte = 'S' // extended: end of pipeline
+	pgMsgTerminate    byte = 'X' // close connection
+	pgMsgPasswordMsg  byte = 'p' // password / SASL response
+	pgMsgClose        byte = 'C' // close (a portal/statement) — frontend-only
+	pgMsgDescribe     byte = 'D' // describe a portal/statement
+	pgMsgFlush        byte = 'H' // flush
+	pgMsgCopyData     byte = 'd' // shared (frontend & backend)
+	pgMsgCopyDone     byte = 'c' // shared
+	pgMsgCopyFail     byte = 'f' // frontend-only
 	pgMsgFunctionCall byte = 'F'
 )
 
