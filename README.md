@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/trmlabs/starrocks-shadow-proxy)](go.mod)
 
-A MySQL protocol-aware proxy that mirrors traffic from a primary StarRocks cluster to a shadow cluster for performance comparison testing.
+A protocol-aware proxy for database upgrade and migration testing. The original mode mirrors MySQL-compatible StarRocks traffic from a primary cluster to a shadow cluster; an experimental Postgres / AlloyDB primary-forwarding mode is available with `PROTOCOL=postgres` (see [docs/POSTGRES.md](docs/POSTGRES.md)).
 
 ## Why
 

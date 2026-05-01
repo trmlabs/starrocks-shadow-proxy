@@ -148,6 +148,20 @@ var (
 		},
 		[]string{"target"},
 	)
+	pgCommands = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_pg_commands_total",
+			Help: "Total number of pgwire frontend messages by type and target",
+		},
+		[]string{"target", "command"},
+	)
+	pgPackets = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_pg_packets_total",
+			Help: "Total number of pgwire frontend messages processed",
+		},
+		[]string{"target"},
+	)
 )
 
 // Worker registry for accurate queue depth tracking
@@ -203,4 +217,7 @@ func init() {
 	// MySQL command metrics
 	prometheus.MustRegister(mysqlCommands)
 	prometheus.MustRegister(mysqlPackets)
+	// Postgres command metrics
+	prometheus.MustRegister(pgCommands)
+	prometheus.MustRegister(pgPackets)
 }

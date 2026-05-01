@@ -2,6 +2,7 @@
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 WORKDIR /src
+RUN apk --no-cache add ca-certificates git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./

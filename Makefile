@@ -47,6 +47,18 @@ test-local: build-linux
 test-local-down:
 	docker-compose -f docker-compose.local.yaml down -v
 
+# Run Postgres / AlloyDB Omni smoke test
+test-pg-local:
+	./test-pg-local.sh
+
+# Start Postgres / AlloyDB Omni smoke stack and leave it running
+test-pg-local-up:
+	./test-pg-local.sh --keep
+
+# Stop Postgres / AlloyDB Omni smoke stack
+test-pg-local-down:
+	docker compose -p pgproto3-proxy -f docker-compose.pg.yaml down -v
+
 # Manual integration test against local environment
 test-integration:
 	@echo "Starting test environment..."
@@ -117,6 +129,9 @@ help:
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  test-local         - Start local test environment"
 	@echo "  test-local-down    - Stop local test environment"
+	@echo "  test-pg-local      - Run Postgres/AlloyDB Omni smoke test"
+	@echo "  test-pg-local-up   - Start Postgres/AlloyDB Omni stack and leave running"
+	@echo "  test-pg-local-down - Stop Postgres/AlloyDB Omni stack"
 	@echo "  test-integration   - Run full integration test"
 	@echo "  test-filter        - Run filter integration test (Docker)"
 	@echo "  docker-build       - Build Linux binary + Docker image (amd64)"
