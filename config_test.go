@@ -164,3 +164,60 @@ func TestDebugLogConfig(t *testing.T) {
 		t.Error("Expected DebugLog to be false when DEBUG_LOG=false")
 	}
 }
+
+func TestPostgresProtocolConfigDefaults(t *testing.T) {
+	os.Setenv("PROTOCOL", "postgres")
+	os.Setenv("PRIMARY_HOST", "postgres-primary")
+	defer func() {
+		os.Unsetenv("PROTOCOL")
+		os.Unsetenv("PRIMARY_HOST")
+		os.Unsetenv("LISTEN_ADDR")
+		os.Unsetenv("PRIMARY_PORT")
+		os.Unsetenv("SHADOW_PORT")
+	}()
+
+	config := loadConfig()
+
+	if config.Protocol != "postgres" {
+		t.Fatalf("Expected Protocol 'postgres', got %q", config.Protocol)
+	}
+	if !isPostgresProtocol(config.Protocol) {
+		t.Fatalf("Expected isPostgresProtocol(%q) to be true", config.Protocol)
+	}
+	if config.ListenAddr != ":5432" {
+		t.Fatalf("Expected Postgres ListenAddr ':5432', got %q", config.ListenAddr)
+	}
+	if config.PrimaryPort != "5432" {
+		t.Fatalf("Expected Postgres PrimaryPort '5432', got %q", config.PrimaryPort)
+	}
+	if config.ShadowPort != "5432" {
+		t.Fatalf("Expected Postgres ShadowPort '5432', got %q", config.ShadowPort)
+	}
+}
+
+func TestPostgresProtocolAliases(t *testing.T) {
+	for _, protocol := range []string{"postgres", "postgresql", "pg", "POSTGRES"} {
+		if !isPostgresProtocol(protocol) {
+			t.Fatalf("Expected %q to select Postgres protocol", protocol)
+		}
+	}
+	if isPostgresProtocol("mysql") {
+		t.Fatalf("Expected mysql to select the MySQL protocol")
+	}
+}
+
+func TestValidateConfigForProtocol(t *testing.T) {
+	if err := validateConfigForProtocol(&Config{
+		Protocol:    "postgres",
+		PrimaryHost: "postgres-primary",
+	}); err != nil {
+		t.Fatalf("Postgres primary-only config should be valid: %v", err)
+	}
+
+	if err := validateConfigForProtocol(&Config{
+		Protocol:    "mysql",
+		PrimaryHost: "starrocks-primary",
+	}); err == nil {
+		t.Fatalf("MySQL config without ShadowHost should be invalid")
+	}
+}

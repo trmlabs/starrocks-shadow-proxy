@@ -1,0 +1,48 @@
+services:
+  alloydb-primary:
+    image: google/alloydbomni:latest
+    container_name: pgproto3-proxy-alloydb-primary
+    environment:
+      POSTGRES_PASSWORD: trmlabs
+    ports:
+      - "15432:5432"
+    networks:
+      - pg-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  shadow-proxy:
+    image: alpine:3.21
+    container_name: pgproto3-postgres-proxy
+    working_dir: /app
+    volumes:
+      - ./starrocks-shadow-proxy:/app/starrocks-shadow-proxy:ro
+    entrypoint: ["./starrocks-shadow-proxy"]
+    environment:
+      PROTOCOL: postgres
+      LISTEN_ADDR: ":5432"
+      METRICS_PORT: ":9090"
+      PRIMARY_HOST: alloydb-primary
+      PRIMARY_PORT: "5432"
+      QUERY_LOG_GCS_BUCKET: ""
+      DEBUG_LOG: "true"
+    ports:
+      - "55432:5432"
+      - "9090:9090"
+    depends_on:
+      alloydb-primary:
+        condition: service_healthy
+    networks:
+      - pg-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  pg-net:
+    driver: bridge

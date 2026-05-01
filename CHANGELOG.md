@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Experimental Postgres / AlloyDB transparent-forward proxy mode selected with `PROTOCOL=postgres`.
+- Pgwire message decoding through `github.com/jackc/pgx/v5/pgproto3`.
+- Postgres command and packet metrics.
+- AlloyDB Omni local smoke test path via `make test-pg-local`.
+
 ## [1.0.0] - 2026-03-23
 
 Initial open-source release.

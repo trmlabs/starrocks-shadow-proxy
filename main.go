@@ -22,12 +22,13 @@ func main() {
 
 	config := loadConfig()
 
-	// Validate config
-	if config.PrimaryHost == "" {
-		log.Fatal("PRIMARY_HOST is required")
+	if err := validateConfigForProtocol(config); err != nil {
+		log.Fatal(err)
 	}
-	if config.ShadowHost == "" {
-		log.Fatal("SHADOW_HOST is required")
+
+	if isPostgresProtocol(config.Protocol) {
+		runPostgresProxy(config)
+		return
 	}
 
 	// Log configuration
