@@ -1,0 +1,207 @@
+# Local TLS-required Postgres stack — mirrors AlloyDB's posture so the proxy
+# can be developed against a backend that refuses plaintext connections.
+#
+# Usage:
+#   ./certs/generate-certs.sh                       # one-time, generates self-signed certs
+#   docker compose -f docker-compose.pg-tls.yaml up --build
+#
+# Direct access (sslmode=require works; sslmode=disable fails by design):
+#   psql "host=127.0.0.1 port=15433 user=postgres dbname=trm sslmode=require"
+#   psql "host=127.0.0.1 port=25433 user=postgres dbname=trm sslmode=require"
+#
+# Proxy access:
+#   psql "host=127.0.0.1 port=5433 user=postgres dbname=trm sslmode=require"
+#
+# Until the proxy implements TLS termination (PR #1.5 / pgproto3 swap),
+# the proxy service in this stack will fail to forward queries against the
+# TLS-required backends. That failure mode is the whole point of this
+# compose file: it lets us iterate on the TLS-termination diff locally
+# against a backend that behaves like the real AlloyDB.
+#
+# Ports differ from docker-compose.pg.yaml so both stacks can coexist:
+#   no-TLS stack:  proxy=5432, primary=15432, shadow=25432
+#   TLS stack:     proxy=5433, primary=15433, shadow=25433, metrics=9091
+
+volumes:
+  pg-tls-certs:
+
+services:
+  # One-shot service that copies the dev certs from ./certs into a named
+  # volume with the right ownership (postgres = UID/GID 70 on alpine).
+  # Doing this in an init service avoids bind-mounting host-owned files
+  # directly, which postgres rejects with "Permissions should be u=rw"
+  # because postgres requires ssl_key_file to be 0600 owned by the postgres
+  # user.
+  certs-init:
+    image: alpine:3.21
+    user: "0:0"
+    volumes:
+      - ./certs:/src:ro
+      - pg-tls-certs:/dst
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -f /src/server.crt ] || [ ! -f /src/server.key ]; then
+          echo "ERROR: /src/server.crt or /src/server.key missing."
+          echo "Run ./certs/generate-certs.sh from the repo root first."
+          exit 1
+        fi
+        cp /src/server.crt /dst/server.crt
+        cp /src/server.key /dst/server.key
+        chmod 644 /dst/server.crt
+        chmod 600 /dst/server.key
+        chown 70:70 /dst/server.crt /dst/server.key
+        echo "TLS certs staged for postgres-primary-tls / postgres-shadow-tls:"
+        ls -la /dst
+
+  postgres-primary-tls:
+    image: postgres:15-alpine
+    container_name: pg-shadow-proxy-primary-tls
+    depends_on:
+      certs-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: trmlabs
+      POSTGRES_DB: trm
+      POSTGRES_INITDB_ARGS: "--data-checksums --auth-host=scram-sha-256"
+    volumes:
+      - pg-tls-certs:/etc/postgres-certs:ro
+      - ./conf/pg_hba_tls.conf:/etc/postgresql/pg_hba.conf:ro
+    command:
+      - "postgres"
+      - "-c"
+      - "ssl=on"
+      - "-c"
+      - "ssl_cert_file=/etc/postgres-certs/server.crt"
+      - "-c"
+      - "ssl_key_file=/etc/postgres-certs/server.key"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba.conf"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "max_connections=200"
+    ports:
+      - "15433:5432"
+    networks:
+      - pg-tls-net
+    healthcheck:
+      # pg_isready over TLS — sslmode=require ensures we don't false-positive
+      # on a server that's accepting plaintext.
+      test: ["CMD-SHELL", "PGPASSWORD=trmlabs psql 'host=127.0.0.1 user=postgres dbname=trm sslmode=require' -c 'select 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres-shadow-tls:
+    image: postgres:18-alpine
+    container_name: pg-shadow-proxy-shadow-tls
+    depends_on:
+      certs-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: trmlabs
+      POSTGRES_DB: trm
+      POSTGRES_INITDB_ARGS: "--data-checksums --auth-host=scram-sha-256"
+    volumes:
+      - pg-tls-certs:/etc/postgres-certs:ro
+      - ./conf/pg_hba_tls.conf:/etc/postgresql/pg_hba.conf:ro
+    command:
+      - "postgres"
+      - "-c"
+      - "ssl=on"
+      - "-c"
+      - "ssl_cert_file=/etc/postgres-certs/server.crt"
+      - "-c"
+      - "ssl_key_file=/etc/postgres-certs/server.key"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba.conf"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "max_connections=200"
+    ports:
+      - "25433:5432"
+    networks:
+      - pg-tls-net
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=trmlabs psql 'host=127.0.0.1 user=postgres dbname=trm sslmode=require' -c 'select 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  shadow-proxy-tls:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pg-shadow-proxy-tls
+    environment:
+      PROTOCOL: postgres
+      LISTEN_ADDR: ":5432"
+      METRICS_PORT: ":9090"
+
+      PRIMARY_HOST: postgres-primary-tls
+      PRIMARY_PORT: "5432"
+      PRIMARY_USER: postgres
+      PRIMARY_PASSWORD: trmlabs
+
+      SHADOW_HOST: postgres-shadow-tls
+      SHADOW_PORT: "5432"
+      SHADOW_USER: postgres
+      SHADOW_PASSWORD: trmlabs
+
+      # TLS termination knobs the proxy will read once the TLS-termination
+      # work lands. The plaintext stack ignores these; the TLS stack uses
+      # them to present a cert to clients AND to dial the TLS backend.
+      # Today's PR #1 build does NOT consume these — the service will
+      # start but query forwarding will fail because pg_hba refuses
+      # plaintext. That's the expected, intentional baseline.
+      TLS_LISTEN_ENABLED: "true"
+      TLS_LISTEN_CERT_FILE: "/certs/server.crt"
+      TLS_LISTEN_KEY_FILE: "/certs/server.key"
+      TLS_BACKEND_ENABLED: "true"
+      TLS_BACKEND_CA_FILE: "/certs/ca.crt"
+      # InsecureSkipVerify only because we use self-signed certs locally;
+      # production must verify against AlloyDB's PSC endpoint cert chain.
+      TLS_BACKEND_INSECURE_SKIP_VERIFY: "true"
+
+      QUERY_LOG_GCS_BUCKET: ""
+      QUERY_LOG_GCS_PREFIX: "pg-query-logs"
+      DEBUG_LOG: "true"
+    volumes:
+      # The proxy needs read access to the cert + key (server-side TLS
+      # listener) and the CA cert (validating the backend). Mount from
+      # the same volume the postgres services use.
+      - pg-tls-certs:/certs:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    ports:
+      - "5433:5432"
+      - "9091:9090"
+    depends_on:
+      postgres-primary-tls:
+        condition: service_healthy
+      postgres-shadow-tls:
+        condition: service_healthy
+    networks:
+      - pg-tls-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  pg-tls-net:
+    driver: bridge

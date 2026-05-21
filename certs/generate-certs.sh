@@ -43,6 +43,9 @@ DNS.3 = shadow-fe
 DNS.4 = shadow-proxy
 DNS.5 = stunnel
 DNS.6 = *.local
+# Postgres TLS compose stack (docker-compose.pg-tls.yaml) service names.
+DNS.7 = postgres-primary-tls
+DNS.8 = postgres-shadow-tls
 IP.1 = 127.0.0.1
 EOF
 
