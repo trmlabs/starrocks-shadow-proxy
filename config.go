@@ -12,6 +12,10 @@ import (
 
 // Config holds the proxy configuration
 type Config struct {
+	// Protocol selects the wire protocol the proxy speaks.
+	// Supported values: "mysql" (default, StarRocks/MySQL-compatible),
+	// "postgres" (alias: "pg", "postgresql") for AlloyDB / Postgres.
+	Protocol        string
 	ListenAddr      string
 	PrimaryHost     string
 	PrimaryPort     string
@@ -57,18 +61,39 @@ func debugf(config *Config, format string, args ...any) {
 	}
 }
 
+// isPostgresProtocol reports whether the configured protocol value selects the
+// pgwire path. Accepts "postgres", "postgresql", and "pg" (case-insensitive).
+func isPostgresProtocol(protocol string) bool {
+	switch strings.ToLower(protocol) {
+	case "postgres", "postgresql", "pg":
+		return true
+	}
+	return false
+}
+
 func loadConfig() *Config {
 	tlsEnabled := getEnv("TLS_ENABLED", "false") == "true"
 	shadowTLSEnabled := getEnv("SHADOW_TLS_ENABLED", "false") == "true"
 	shadowTLSInsecure := getEnv("SHADOW_TLS_INSECURE", "true") == "true" // Default true for dev
+
+	// Protocol-aware port defaults: postgres listens on 5432, mysql on 3306.
+	protocol := strings.ToLower(getEnv("PROTOCOL", "mysql"))
+	defaultListen := ":3306"
+	defaultBackendPort := "9030"
+	if isPostgresProtocol(protocol) {
+		defaultListen = ":5432"
+		defaultBackendPort = "5432"
+	}
+
 	return &Config{
-		ListenAddr:      getEnv("LISTEN_ADDR", ":3306"),
+		Protocol:        protocol,
+		ListenAddr:      getEnv("LISTEN_ADDR", defaultListen),
 		PrimaryHost:     getEnv("PRIMARY_HOST", ""),
-		PrimaryPort:     getEnv("PRIMARY_PORT", "9030"),
+		PrimaryPort:     getEnv("PRIMARY_PORT", defaultBackendPort),
 		PrimaryUser:     getEnv("PRIMARY_USER", "root"),
 		PrimaryPassword: getEnv("PRIMARY_PASSWORD", ""),
 		ShadowHost:      getEnv("SHADOW_HOST", ""),
-		ShadowPort:      getEnv("SHADOW_PORT", "9030"),
+		ShadowPort:      getEnv("SHADOW_PORT", defaultBackendPort),
 		ShadowUser:      getEnv("SHADOW_USER", "root"),
 		ShadowPassword:  getEnv("SHADOW_PASSWORD", ""),
 		MetricsPort:     getEnv("METRICS_PORT", ":9090"),

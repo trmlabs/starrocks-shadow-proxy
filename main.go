@@ -26,6 +26,13 @@ func main() {
 	if config.PrimaryHost == "" {
 		log.Fatal("PRIMARY_HOST is required")
 	}
+
+	// Dispatch on protocol. Postgres MVP runs in transparent-forward mode (no shadow yet).
+	if isPostgresProtocol(config.Protocol) {
+		runPostgresProxy(config)
+		return
+	}
+
 	if config.ShadowHost == "" {
 		log.Fatal("SHADOW_HOST is required")
 	}
