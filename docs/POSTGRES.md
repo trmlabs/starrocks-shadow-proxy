@@ -15,9 +15,24 @@ A pgwire-aware TCP proxy that:
 **Not in PR #1 (deliberately):**
 
 - No shadow mirroring. The `SHADOW_HOST` env var is read but unused. PR #2 wires up `ShadowWorker` to async-mirror frontend messages to a second backend.
-- No TLS termination. Clients must connect with `sslmode=disable` (or `sslmode=prefer`, which falls back). When the client sends an `SSLRequest` and the server agrees ('S'), the proxy refuses the connection.
 - No HA. Single replica only. Fine for staging at our QPS; needs multi-replica + connection-aware LB before customer traffic.
 - No sampling. PR #2 adds connection-level sampling so we can throttle shadow load if needed.
+
+**Added in the TLS follow-up (commit 459946d):**
+
+- Listener-side TLS termination (gated on `TLS_ENABLED=true`) — the proxy
+  replies `'S'` to client `SSLRequest` and wraps the connection in
+  `tls.Server` using the configured cert + key.
+- Backend-side TLS initiation (gated on `PRIMARY_TLS_ENABLED=true`) — before
+  forwarding any pgwire framing, the proxy sends its own `SSLRequest` to the
+  primary and wraps the connection in `tls.Client`. Required for AlloyDB,
+  whose `pg_hba` refuses plaintext.
+
+The two hops are independent. A common AlloyDB production posture is
+`TLS_ENABLED=false` (pgbouncer → proxy stays plaintext within the VPC) and
+`PRIMARY_TLS_ENABLED=true` (proxy → AlloyDB is TLS). Local development
+against `docker-compose.pg-tls.yaml` sets both to true to mirror a future
+cert-fronted deploy.
 
 ## Environment variables
 
@@ -41,6 +56,17 @@ Backend / listener (shared with the MySQL path; defaults differ when `PROTOCOL=p
 | `QUERY_LOG_GCS_BUCKET` | `""` | GCS bucket for JSONL query logs. Empty = disabled. |
 | `QUERY_LOG_GCS_PREFIX` | `query-logs` | Path prefix within bucket. |
 | `DEBUG_LOG` | `false` | Verbose per-connection traces. Off by default. |
+
+TLS:
+
+| Var | Default | Description |
+|---|---|---|
+| `TLS_ENABLED` | `false` | Listener-side TLS termination. When true, the proxy presents `TLS_CERT_FILE` to clients. |
+| `TLS_CERT_FILE` | `/certs/tls.crt` | Server cert for listener TLS. |
+| `TLS_KEY_FILE` | `/certs/tls.key` | Server key for listener TLS. Must be 0600. |
+| `PRIMARY_TLS_ENABLED` | `false` | Backend-side TLS initiation. Required against AlloyDB. |
+| `PRIMARY_TLS_CA_FILE` | `""` | PEM bundle for verifying the backend cert. Empty = system roots. |
+| `PRIMARY_TLS_INSECURE_SKIP_VERIFY` | `false` | Dev only (self-signed). Must be `false` in production. |
 
 Vault integration for secrets is a deployment concern — the proxy reads plain env vars. Wire `PRIMARY_PASSWORD` / `SHADOW_PASSWORD` from a Vault Agent sidecar or a Kubernetes secret synced from Vault.
 
