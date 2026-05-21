@@ -162,20 +162,19 @@ services:
       SHADOW_USER: postgres
       SHADOW_PASSWORD: trmlabs
 
-      # TLS termination knobs the proxy will read once the TLS-termination
-      # work lands. The plaintext stack ignores these; the TLS stack uses
-      # them to present a cert to clients AND to dial the TLS backend.
-      # Today's PR #1 build does NOT consume these — the service will
-      # start but query forwarding will fail because pg_hba refuses
-      # plaintext. That's the expected, intentional baseline.
-      TLS_LISTEN_ENABLED: "true"
-      TLS_LISTEN_CERT_FILE: "/certs/server.crt"
-      TLS_LISTEN_KEY_FILE: "/certs/server.key"
-      TLS_BACKEND_ENABLED: "true"
-      TLS_BACKEND_CA_FILE: "/certs/ca.crt"
-      # InsecureSkipVerify only because we use self-signed certs locally;
+      # TLS termination knobs. The proxy uses TLSEnabled to wrap the listener,
+      # and PRIMARY_TLS_ENABLED to initiate a pgwire SSLRequest against the
+      # primary before forwarding any StartupMessage. AlloyDB requires this
+      # in production; the local TLS-required postgres images here mirror
+      # that posture so we can iterate without staging round-trips.
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: "/certs/server.crt"
+      TLS_KEY_FILE: "/certs/server.key"
+      PRIMARY_TLS_ENABLED: "true"
+      PRIMARY_TLS_CA_FILE: "/certs/ca.crt"
+      # Insecure-skip-verify ONLY because we use self-signed certs locally;
       # production must verify against AlloyDB's PSC endpoint cert chain.
-      TLS_BACKEND_INSECURE_SKIP_VERIFY: "true"
+      PRIMARY_TLS_INSECURE_SKIP_VERIFY: "true"
 
       QUERY_LOG_GCS_BUCKET: ""
       QUERY_LOG_GCS_PREFIX: "pg-query-logs"

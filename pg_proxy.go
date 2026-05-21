@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"crypto/md5"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -36,16 +37,26 @@ const (
 	pgBackendCopyBothResponse byte = 'W'
 )
 
-// PgProxy is a pgwire transparent forwarder.
+// PgProxy is a pgwire transparent forwarder with optional TLS termination
+// (listener side) and TLS initiation (backend side).
 type PgProxy struct {
-	config      *Config
-	primaryAddr string
+	config           *Config
+	primaryAddr      string
+	listenerTLS      *tls.Config // non-nil when proxy terminates client TLS
+	backendTLS       *tls.Config // non-nil when proxy initiates backend TLS
 }
 
-func NewPgProxy(config *Config) *PgProxy {
+// NewPgProxy constructs a PgProxy. listenerTLS and backendTLS may be nil
+// independently: nil/nil is the original transparent-forward MVP behavior;
+// nil/non-nil is the common AlloyDB shape (plain client → TLS backend);
+// non-nil/non-nil is full client-and-backend TLS (used by the local TLS
+// docker-compose stack and any future cert-fronted production deploy).
+func NewPgProxy(config *Config, listenerTLS, backendTLS *tls.Config) *PgProxy {
 	return &PgProxy{
 		config:      config,
 		primaryAddr: fmt.Sprintf("%s:%s", config.PrimaryHost, config.PrimaryPort),
+		listenerTLS: listenerTLS,
+		backendTLS:  backendTLS,
 	}
 }
 
@@ -100,73 +111,107 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 	}
 	defer primary.Close()
 
-	startup, err := p.forwardStartup(client, primary)
+	// Backend TLS is established BEFORE any pgwire framing — the proxy
+	// initiates its own SSLRequest against the primary. Downstream code
+	// sees the TLS-wrapped connection as an ordinary net.Conn.
+	var primaryConn net.Conn = primary
+	if p.backendTLS != nil {
+		tlsConn, err := upgradeBackendTLS(primary, p.backendTLS)
+		if err != nil {
+			log.Printf("PgProxy: backend TLS upgrade failed: %v", err)
+			tlsFailures.Inc()
+			return
+		}
+		primaryConn = tlsConn
+		debugf(p.config, "PgProxy: backend TLS established to %s", p.primaryAddr)
+	}
+
+	// forwardStartup may upgrade the client side to TLS and returns the
+	// (possibly TLS-wrapped) conn for the rest of the session.
+	clientConn, startup, err := p.forwardStartup(client, primaryConn)
 	if err != nil {
 		debugf(p.config, "PgProxy: startup err: %v", err)
 		return
 	}
 	if startup == nil {
-		// CancelRequest: server processes and closes the connection.
+		// CancelRequest: backend processes and closes the connection.
 		return
 	}
 
-	if err := p.forwardAuthPhase(client, primary); err != nil {
+	if err := p.forwardAuthPhase(clientConn, primaryConn); err != nil {
 		debugf(p.config, "PgProxy: auth phase err: %v", err)
 		return
 	}
 
-	p.runQueryLoop(client, primary, clientAddr, logger)
+	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger)
 }
 
-// forwardStartup forwards the client's first message (StartupMessage / SSLRequest /
-// GSSENCRequest / CancelRequest) to the primary. Returns the StartupMessage that
-// will be in effect for the rest of the session, or nil if the connection should
-// be closed (CancelRequest).
+// forwardStartup handles the pgwire startup phase from the client side.
 //
-// libpq's default negotiation can send TWO probe messages before the
-// StartupMessage:
+// libpq's default negotiation can emit up to two probe messages before the
+// real StartupMessage:
 //
-//   - gssencmode=prefer (default): send GSSENCRequest first.
-//   - sslmode=prefer (default):    send SSLRequest after GSSENC is declined.
+//   - gssencmode=prefer (default): GSSENCRequest first.
+//   - sslmode=prefer (default):    SSLRequest after GSSENC was declined.
 //
-// We loop on the probe messages and only stop once the server has acknowledged
-// 'N' to whichever probe was last sent and the client follows up with the real
-// StartupMessage. If the server agrees to SSL/GSS ('S'), we bail — terminating
-// TLS at the proxy is out of scope for MVP. Configure clients with
-// `sslmode=disable gssencmode=disable` to avoid those probes entirely.
-func (p *PgProxy) forwardStartup(client, primary net.Conn) (*PgPacket, error) {
+// We loop on probes and respond directly (the backend connection is *not*
+// involved in the client-side TLS decision):
+//
+//   - GSSENCRequest      → always reply 'N'. We never terminate GSS.
+//   - SSLRequest, listenerTLS != nil  → reply 'S' + upgrade client conn to TLS.
+//   - SSLRequest, listenerTLS == nil  → reply 'N'. sslmode=require will then
+//                                        fail at the client; sslmode=prefer
+//                                        falls back to plaintext.
+//   - CancelRequest      → forward to primary (already TLS-wrapped if
+//                          backend TLS was enabled) and close.
+//   - StartupMessage     → forward to primary and return.
+//
+// Returns the (possibly TLS-upgraded) client conn, the StartupMessage that
+// is now in effect for the rest of the session, and any error. A nil
+// StartupMessage with nil error means CancelRequest was handled and the
+// caller should close the connection.
+func (p *PgProxy) forwardStartup(client, primary net.Conn) (net.Conn, *PgPacket, error) {
 	for {
 		startup, err := ReadStartupMessage(client)
 		if err != nil {
-			return nil, fmt.Errorf("read startup from client: %w", err)
+			return client, nil, fmt.Errorf("read startup from client: %w", err)
 		}
 
-		if _, err := primary.Write(startup.Payload); err != nil {
-			return nil, fmt.Errorf("forward startup to primary: %w", err)
-		}
-
-		if IsSSLRequest(startup) || IsGSSENCRequest(startup) {
-			resp := make([]byte, 1)
-			if _, err := io.ReadFull(primary, resp); err != nil {
-				return nil, fmt.Errorf("read SSL/GSSENC response: %w", err)
+		switch {
+		case IsSSLRequest(startup):
+			if p.listenerTLS != nil {
+				tlsConn, err := upgradeClientTLS(client, p.listenerTLS)
+				if err != nil {
+					tlsFailures.Inc()
+					return client, nil, err
+				}
+				debugf(p.config, "PgProxy: client TLS terminated")
+				client = tlsConn
+				continue
 			}
-			if _, err := client.Write(resp); err != nil {
-				return nil, fmt.Errorf("forward SSL/GSSENC response: %w", err)
+			if _, err := client.Write([]byte{'N'}); err != nil {
+				return client, nil, fmt.Errorf("write 'N' SSL reject to client: %w", err)
 			}
-			if resp[0] == 'S' {
-				tlsFailures.Inc()
-				return nil, fmt.Errorf("server agreed to SSL/GSS; proxy does not terminate TLS in MVP — connect with sslmode=disable gssencmode=disable")
-			}
-			// 'N' or 'E' — the client may follow up with another probe (SSLRequest
-			// after GSSENC was declined) or the real StartupMessage. Loop.
 			continue
+
+		case IsGSSENCRequest(startup):
+			if _, err := client.Write([]byte{'N'}); err != nil {
+				return client, nil, fmt.Errorf("write 'N' GSSENC reject to client: %w", err)
+			}
+			continue
+
+		case IsCancelRequest(startup):
+			if _, err := primary.Write(startup.Payload); err != nil {
+				return client, nil, fmt.Errorf("forward cancel to primary: %w", err)
+			}
+			return client, nil, nil
 		}
 
-		if IsCancelRequest(startup) {
-			return nil, nil
+		// Real StartupMessage — forward to the (possibly TLS-wrapped) primary.
+		if _, err := primary.Write(startup.Payload); err != nil {
+			return client, nil, fmt.Errorf("forward startup to primary: %w", err)
 		}
-
-		return startup, nil
+		return client, startup, nil
 	}
 }
 

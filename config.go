@@ -26,10 +26,24 @@ type Config struct {
 	ShadowUser      string
 	ShadowPassword  string
 	MetricsPort     string
-	// TLS configuration for client connections (proxy as server)
+	// TLS configuration for client connections (proxy as server).
+	// When the proxy is the pgwire endpoint and TLSEnabled is true, the proxy
+	// will respond 'S' to a client's SSLRequest and upgrade the connection
+	// via crypto/tls using the configured cert+key. When TLSEnabled is false
+	// (transparent-forward mode), the proxy refuses to terminate TLS and
+	// requires clients to use sslmode=disable.
 	TLSEnabled  bool
 	TLSCertFile string
 	TLSKeyFile  string
+	// TLS configuration for the primary backend connection (proxy as client).
+	// PrimaryTLSEnabled causes the proxy to initiate a pgwire SSLRequest
+	// against the primary and upgrade the backend connection to TLS before
+	// forwarding the client's StartupMessage. AlloyDB's default pg_hba
+	// requires TLS for non-loopback connections, so this must be true for
+	// AlloyDB targets.
+	PrimaryTLSEnabled            bool
+	PrimaryTLSCAFile             string // PEM bundle for validating the primary cert
+	PrimaryTLSInsecureSkipVerify bool   // dev / self-signed only; never true in prod
 	// Shadow queue and timeout configuration
 	ShadowQueueSize            int
 	ShadowReadTimeout          time.Duration
@@ -97,9 +111,12 @@ func loadConfig() *Config {
 		ShadowUser:      getEnv("SHADOW_USER", "root"),
 		ShadowPassword:  getEnv("SHADOW_PASSWORD", ""),
 		MetricsPort:     getEnv("METRICS_PORT", ":9090"),
-		TLSEnabled:      tlsEnabled,
-		TLSCertFile:     getEnv("TLS_CERT_FILE", "/certs/tls.crt"),
-		TLSKeyFile:      getEnv("TLS_KEY_FILE", "/certs/tls.key"),
+		TLSEnabled:                   tlsEnabled,
+		TLSCertFile:                  getEnv("TLS_CERT_FILE", "/certs/tls.crt"),
+		TLSKeyFile:                   getEnv("TLS_KEY_FILE", "/certs/tls.key"),
+		PrimaryTLSEnabled:            getEnv("PRIMARY_TLS_ENABLED", "false") == "true",
+		PrimaryTLSCAFile:             getEnv("PRIMARY_TLS_CA_FILE", ""),
+		PrimaryTLSInsecureSkipVerify: getEnv("PRIMARY_TLS_INSECURE_SKIP_VERIFY", "false") == "true",
 		// Shadow queue and timeout configuration (with sensible defaults)
 		ShadowQueueSize:            getEnvInt("SHADOW_QUEUE_SIZE", 10000),
 		ShadowReadTimeout:          time.Duration(getEnvInt("SHADOW_READ_TIMEOUT_SECONDS", 30)) * time.Second,

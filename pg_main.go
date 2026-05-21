@@ -32,6 +32,8 @@ func runPostgresProxy(config *Config) {
 	log.Printf("  Protocol:           %s", config.Protocol)
 	log.Printf("  Listen Addr:        %s", config.ListenAddr)
 	log.Printf("  Primary:            %s:%s", config.PrimaryHost, config.PrimaryPort)
+	log.Printf("  Listener TLS:       %v", config.TLSEnabled)
+	log.Printf("  Backend TLS:        %v (insecure_skip_verify=%v)", config.PrimaryTLSEnabled, config.PrimaryTLSInsecureSkipVerify)
 	if config.ShadowHost != "" {
 		log.Printf("  Shadow (configured but not yet wired in PR #1): %s:%s", config.ShadowHost, config.ShadowPort)
 	}
@@ -40,6 +42,15 @@ func runPostgresProxy(config *Config) {
 		log.Printf("  Query Log GCS Prefix:   %s", config.QueryLogGCSPrefix)
 		log.Printf("  Query Log Flush Interval: %v", config.QueryLogFlushInterval)
 		log.Printf("  Query Log Batch Size:   %d", config.QueryLogBatchSize)
+	}
+
+	listenerTLSConfig, err := loadListenerTLSConfig(config)
+	if err != nil {
+		log.Fatalf("Listener TLS config: %v", err)
+	}
+	backendTLSConfig, err := loadBackendTLSConfig(config)
+	if err != nil {
+		log.Fatalf("Backend TLS config: %v", err)
 	}
 
 	primaryAddr := fmt.Sprintf("%s:%s", config.PrimaryHost, config.PrimaryPort)
@@ -133,7 +144,7 @@ func runPostgresProxy(config *Config) {
 		}
 	}
 
-	proxy := NewPgProxy(config)
+	proxy := NewPgProxy(config, listenerTLSConfig, backendTLSConfig)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
