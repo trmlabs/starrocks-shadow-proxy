@@ -26,24 +26,14 @@ type Config struct {
 	ShadowUser      string
 	ShadowPassword  string
 	MetricsPort     string
-	// TLS configuration for client connections (proxy as server).
-	// When the proxy is the pgwire endpoint and TLSEnabled is true, the proxy
-	// will respond 'S' to a client's SSLRequest and upgrade the connection
-	// via crypto/tls using the configured cert+key. When TLSEnabled is false
-	// (transparent-forward mode), the proxy refuses to terminate TLS and
-	// requires clients to use sslmode=disable.
+	// Listener-side TLS (proxy as server)
 	TLSEnabled  bool
 	TLSCertFile string
 	TLSKeyFile  string
-	// TLS configuration for the primary backend connection (proxy as client).
-	// PrimaryTLSEnabled causes the proxy to initiate a pgwire SSLRequest
-	// against the primary and upgrade the backend connection to TLS before
-	// forwarding the client's StartupMessage. AlloyDB's default pg_hba
-	// requires TLS for non-loopback connections, so this must be true for
-	// AlloyDB targets.
+	// Backend-side TLS (proxy as client). Required against AlloyDB.
 	PrimaryTLSEnabled            bool
-	PrimaryTLSCAFile             string // PEM bundle for validating the primary cert
-	PrimaryTLSInsecureSkipVerify bool   // dev / self-signed only; never true in prod
+	PrimaryTLSCAFile             string
+	PrimaryTLSInsecureSkipVerify bool
 	// Shadow queue and timeout configuration
 	ShadowQueueSize            int
 	ShadowReadTimeout          time.Duration

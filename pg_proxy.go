@@ -37,20 +37,14 @@ const (
 	pgBackendCopyBothResponse byte = 'W'
 )
 
-// PgProxy is a pgwire transparent forwarder with optional TLS termination
-// (listener side) and TLS initiation (backend side).
+// PgProxy is a pgwire transparent forwarder with optional TLS on either hop.
 type PgProxy struct {
-	config           *Config
-	primaryAddr      string
-	listenerTLS      *tls.Config // non-nil when proxy terminates client TLS
-	backendTLS       *tls.Config // non-nil when proxy initiates backend TLS
+	config      *Config
+	primaryAddr string
+	listenerTLS *tls.Config // nil → client TLS not terminated
+	backendTLS  *tls.Config // nil → backend dialed plaintext
 }
 
-// NewPgProxy constructs a PgProxy. listenerTLS and backendTLS may be nil
-// independently: nil/nil is the original transparent-forward MVP behavior;
-// nil/non-nil is the common AlloyDB shape (plain client → TLS backend);
-// non-nil/non-nil is full client-and-backend TLS (used by the local TLS
-// docker-compose stack and any future cert-fronted production deploy).
 func NewPgProxy(config *Config, listenerTLS, backendTLS *tls.Config) *PgProxy {
 	return &PgProxy{
 		config:      config,
@@ -111,9 +105,7 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 	}
 	defer primary.Close()
 
-	// Backend TLS is established BEFORE any pgwire framing — the proxy
-	// initiates its own SSLRequest against the primary. Downstream code
-	// sees the TLS-wrapped connection as an ordinary net.Conn.
+	// Backend TLS must be established before any pgwire framing.
 	var primaryConn net.Conn = primary
 	if p.backendTLS != nil {
 		tlsConn, err := upgradeBackendTLS(primary, p.backendTLS)
@@ -126,15 +118,12 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 		debugf(p.config, "PgProxy: backend TLS established to %s", p.primaryAddr)
 	}
 
-	// forwardStartup may upgrade the client side to TLS and returns the
-	// (possibly TLS-wrapped) conn for the rest of the session.
 	clientConn, startup, err := p.forwardStartup(client, primaryConn)
 	if err != nil {
 		debugf(p.config, "PgProxy: startup err: %v", err)
 		return
 	}
 	if startup == nil {
-		// CancelRequest: backend processes and closes the connection.
 		return
 	}
 
@@ -146,30 +135,11 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger)
 }
 
-// forwardStartup handles the pgwire startup phase from the client side.
-//
-// libpq's default negotiation can emit up to two probe messages before the
-// real StartupMessage:
-//
-//   - gssencmode=prefer (default): GSSENCRequest first.
-//   - sslmode=prefer (default):    SSLRequest after GSSENC was declined.
-//
-// We loop on probes and respond directly (the backend connection is *not*
-// involved in the client-side TLS decision):
-//
-//   - GSSENCRequest      → always reply 'N'. We never terminate GSS.
-//   - SSLRequest, listenerTLS != nil  → reply 'S' + upgrade client conn to TLS.
-//   - SSLRequest, listenerTLS == nil  → reply 'N'. sslmode=require will then
-//                                        fail at the client; sslmode=prefer
-//                                        falls back to plaintext.
-//   - CancelRequest      → forward to primary (already TLS-wrapped if
-//                          backend TLS was enabled) and close.
-//   - StartupMessage     → forward to primary and return.
-//
-// Returns the (possibly TLS-upgraded) client conn, the StartupMessage that
-// is now in effect for the rest of the session, and any error. A nil
-// StartupMessage with nil error means CancelRequest was handled and the
-// caller should close the connection.
+// forwardStartup handles the client-side startup phase: loops on libpq's
+// GSSENCRequest / SSLRequest probes (terminating TLS if listenerTLS is set),
+// then forwards the real StartupMessage to the backend. Returns the
+// (possibly TLS-upgraded) client conn and the StartupMessage in effect, or
+// (conn, nil, nil) if the client sent a CancelRequest.
 func (p *PgProxy) forwardStartup(client, primary net.Conn) (net.Conn, *PgPacket, error) {
 	for {
 		startup, err := ReadStartupMessage(client)

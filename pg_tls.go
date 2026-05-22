@@ -1,26 +1,3 @@
-// pg_tls.go — TLS handshake helpers for the pgwire shadow proxy.
-//
-// Two flows are supported, each independently enabled via Config:
-//
-//   1. Client-side termination (Config.TLSEnabled):
-//      Client → SSLRequest → proxy. Proxy replies 'S' (accept), wraps the
-//      client connection in tls.Server() using the configured cert+key, and
-//      then reads the real StartupMessage off the TLS-protected stream.
-//
-//   2. Backend-side initiation (Config.PrimaryTLSEnabled):
-//      After the proxy has dialed the primary over plain TCP, the proxy
-//      itself sends a pgwire SSLRequest, reads the server's 1-byte response,
-//      and upgrades the backend connection via tls.Client() if the server
-//      agrees ('S'). The proxy then proceeds with the StartupMessage flow on
-//      the TLS-protected stream.
-//
-// These two flows are independent. A common production configuration is:
-//   TLSEnabled=false   (pgbouncer → proxy stays plaintext within the VPC)
-//   PrimaryTLSEnabled=true   (proxy → AlloyDB requires TLS by pg_hba)
-//
-// Local dev with `docker-compose.pg-tls.yaml` sets both to true so the entire
-// chain is encrypted end-to-end, mirroring a future cert-fronted deploy.
-
 package main
 
 import (
@@ -33,8 +10,7 @@ import (
 	"os"
 )
 
-// loadListenerTLSConfig returns a *tls.Config the proxy uses to terminate TLS
-// from clients. Returns nil when TLS is not configured for the listener.
+// loadListenerTLSConfig returns nil when listener TLS is disabled.
 func loadListenerTLSConfig(config *Config) (*tls.Config, error) {
 	if !config.TLSEnabled {
 		return nil, nil
@@ -50,8 +26,7 @@ func loadListenerTLSConfig(config *Config) (*tls.Config, error) {
 	}, nil
 }
 
-// loadBackendTLSConfig returns a *tls.Config the proxy uses when dialing the
-// primary over TLS. Returns nil when backend TLS is disabled.
+// loadBackendTLSConfig returns nil when backend TLS is disabled.
 func loadBackendTLSConfig(config *Config) (*tls.Config, error) {
 	if !config.PrimaryTLSEnabled {
 		return nil, nil
@@ -75,9 +50,7 @@ func loadBackendTLSConfig(config *Config) (*tls.Config, error) {
 	return tlsConf, nil
 }
 
-// upgradeClientTLS replies 'S' to a client's SSLRequest and wraps the
-// connection in tls.Server. Caller must have already consumed the SSLRequest
-// bytes from `client`.
+// upgradeClientTLS replies 'S' to the client's SSLRequest then wraps in tls.Server.
 func upgradeClientTLS(client net.Conn, listenerTLSConfig *tls.Config) (*tls.Conn, error) {
 	if _, err := client.Write([]byte{'S'}); err != nil {
 		return nil, fmt.Errorf("write SSLRequest 'S' ack to client: %w", err)
@@ -89,17 +62,8 @@ func upgradeClientTLS(client net.Conn, listenerTLSConfig *tls.Config) (*tls.Conn
 	return tlsConn, nil
 }
 
-// upgradeBackendTLS initiates a pgwire SSLRequest against `primary` and
-// upgrades the connection to TLS if the server agrees. Returns the
-// TLS-wrapped connection. The caller must not have sent any bytes yet.
-//
-// On wire:
-//   - we send: SSLRequest (length=8, magic=80877103) → 8 bytes
-//   - server replies: 1 byte, 'S' to accept or 'N' to reject
-//
-// If the server replies 'N' or anything else when PrimaryTLSEnabled is set,
-// it is a hard error: the operator asked for TLS to the backend, but the
-// backend refuses. Failing closed is better than silently degrading.
+// upgradeBackendTLS sends an SSLRequest and wraps in tls.Client when accepted.
+// Fails closed if the backend replies 'N' — operator asked for TLS, server refused.
 func upgradeBackendTLS(primary net.Conn, backendTLSConfig *tls.Config) (*tls.Conn, error) {
 	sslReq := make([]byte, 8)
 	binary.BigEndian.PutUint32(sslReq[0:4], 8)

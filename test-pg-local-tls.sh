@@ -1,30 +1,7 @@
 #!/usr/bin/env bash
-# test-pg-local-tls.sh — TLS-required smoke test for the Postgres shadow proxy.
-#
-# Mirrors AlloyDB's "TLS-only" posture. Backend Postgres containers are
-# configured with hostssl-only pg_hba (see conf/pg_hba_tls.conf), so a
-# plaintext connection attempt is rejected at the protocol layer with the
-# exact error the staging AlloyDB cluster returned on 2026-05-21:
-#   "no pg_hba.conf entry for host ..., no encryption"
-#
-# Until the proxy implements TLS termination, the proxy-path queries WILL
-# fail. That is the expected baseline: this script exists so that as the
-# pgproto3 / TLS termination diff comes together, we can iterate locally
-# without touching staging.
-#
-# Phases:
-#   1. Direct sslmode=require   → pass (proves the test env is alive)
-#   2. Direct sslmode=disable   → must fail with "no encryption" (proves we
-#                                   replicate AlloyDB's posture)
-#   3. Proxy  sslmode=require   → pass once TLS termination lands
-#   4. Proxy  sslmode=disable   → must fail once TLS-only enforcement is wired
-#
-# Usage:
-#   ./certs/generate-certs.sh             # one-time
-#   ./test-pg-local-tls.sh                # full cycle, tears down on exit
-#   ./test-pg-local-tls.sh --keep         # leaves the stack up for manual poking
-#   ./test-pg-local-tls.sh --skip-proxy   # only run direct-backend phases
-#                                            (use until proxy TLS support lands)
+# Four-phase TLS smoke test: direct/proxy × require/disable.
+# Backends mirror AlloyDB's TLS-only pg_hba. Run ./certs/generate-certs.sh once first.
+# Flags: --keep (leave stack up), --skip-proxy (direct-backend phases only).
 
 set -euo pipefail
 

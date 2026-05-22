@@ -111,10 +111,7 @@ func runPostgresProxy(config *Config) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"primary": {"address": "%s", "healthy": %v}}`, primaryAddr, ok)
 		})
-		// pprof endpoints under /debug/pprof/* — mounted on the custom mux
-		// (not DefaultServeMux) so they're explicit. Lets us run
-		//   go tool pprof http://localhost:9090/debug/pprof/profile?seconds=30
-		// against a running proxy without ingress changes.
+		// pprof handlers on the same mux as /metrics, not DefaultServeMux.
 		mux.HandleFunc("/debug/pprof/", pprof.Index)
 		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)

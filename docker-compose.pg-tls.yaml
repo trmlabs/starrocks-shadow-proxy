@@ -1,37 +1,13 @@
-# Local TLS-required Postgres stack — mirrors AlloyDB's posture so the proxy
-# can be developed against a backend that refuses plaintext connections.
-#
-# Usage:
-#   ./certs/generate-certs.sh                       # one-time, generates self-signed certs
-#   docker compose -f docker-compose.pg-tls.yaml up --build
-#
-# Direct access (sslmode=require works; sslmode=disable fails by design):
-#   psql "host=127.0.0.1 port=15433 user=postgres dbname=trm sslmode=require"
-#   psql "host=127.0.0.1 port=25433 user=postgres dbname=trm sslmode=require"
-#
-# Proxy access:
-#   psql "host=127.0.0.1 port=5433 user=postgres dbname=trm sslmode=require"
-#
-# Until the proxy implements TLS termination (PR #1.5 / pgproto3 swap),
-# the proxy service in this stack will fail to forward queries against the
-# TLS-required backends. That failure mode is the whole point of this
-# compose file: it lets us iterate on the TLS-termination diff locally
-# against a backend that behaves like the real AlloyDB.
-#
-# Ports differ from docker-compose.pg.yaml so both stacks can coexist:
-#   no-TLS stack:  proxy=5432, primary=15432, shadow=25432
-#   TLS stack:     proxy=5433, primary=15433, shadow=25433, metrics=9091
+# TLS-required Postgres stack mirroring AlloyDB. Ports offset by 1 from
+# docker-compose.pg.yaml so both stacks coexist (proxy=5433, primary=15433,
+# shadow=25433, metrics=9091). Requires ./certs/generate-certs.sh first.
 
 volumes:
   pg-tls-certs:
 
 services:
-  # One-shot service that copies the dev certs from ./certs into a named
-  # volume with the right ownership (postgres = UID/GID 70 on alpine).
-  # Doing this in an init service avoids bind-mounting host-owned files
-  # directly, which postgres rejects with "Permissions should be u=rw"
-  # because postgres requires ssl_key_file to be 0600 owned by the postgres
-  # user.
+  # Stages certs into a volume with postgres:70:70 ownership; postgres requires
+  # ssl_key_file to be 0600 owned by its run-user.
   certs-init:
     image: alpine:3.21
     user: "0:0"
@@ -162,19 +138,12 @@ services:
       SHADOW_USER: postgres
       SHADOW_PASSWORD: trmlabs
 
-      # TLS termination knobs. The proxy uses TLSEnabled to wrap the listener,
-      # and PRIMARY_TLS_ENABLED to initiate a pgwire SSLRequest against the
-      # primary before forwarding any StartupMessage. AlloyDB requires this
-      # in production; the local TLS-required postgres images here mirror
-      # that posture so we can iterate without staging round-trips.
       TLS_ENABLED: "true"
       TLS_CERT_FILE: "/certs/server.crt"
       TLS_KEY_FILE: "/certs/server.key"
       PRIMARY_TLS_ENABLED: "true"
       PRIMARY_TLS_CA_FILE: "/certs/ca.crt"
-      # Insecure-skip-verify ONLY because we use self-signed certs locally;
-      # production must verify against AlloyDB's PSC endpoint cert chain.
-      PRIMARY_TLS_INSECURE_SKIP_VERIFY: "true"
+      PRIMARY_TLS_INSECURE_SKIP_VERIFY: "true"   # self-signed dev certs only
 
       QUERY_LOG_GCS_BUCKET: ""
       QUERY_LOG_GCS_PREFIX: "pg-query-logs"

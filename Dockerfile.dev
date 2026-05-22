@@ -1,18 +1,4 @@
-# Dockerfile.dev — Dev-only image that consumes a pre-built binary.
-#
-# Skips the multi-stage build that would otherwise run `go mod download`
-# inside docker (which fails behind TLS-intercepting corporate proxies like
-# Zscaler where the buildkit instance doesn't inherit the host's CA bundle).
-#
-# Usage:
-#   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o starrocks-shadow-proxy-linux-amd64 .
-#   docker build -t ghcr.io/trmlabs/starrocks-shadow-proxy:dev-<tag> -f Dockerfile.dev .
-#   docker push    ghcr.io/trmlabs/starrocks-shadow-proxy:dev-<tag>
-#
-# DO NOT use this for releases — `Dockerfile` is the source of truth and is
-# what GitHub Actions Release builds. This file exists solely to unblock
-# local iteration during the TLS-termination work.
-
+# Dev image — consumes a pre-built binary. Use the main Dockerfile for releases.
 FROM alpine:3.21
 
 LABEL org.opencontainers.image.source="https://github.com/trmlabs/starrocks-shadow-proxy"
