@@ -62,8 +62,11 @@ func (p *PgProxy) Start(ctx context.Context, logger *QueryLogger) error {
 	}
 	defer listener.Close()
 
-	log.Printf("PgProxy listening on %s (plain TCP, no shadow yet)", p.config.ListenAddr)
+	log.Printf("PgProxy listening on %s", p.config.ListenAddr)
 	log.Printf("Primary: %s", p.primaryAddr)
+	if p.config.ShadowHost != "" {
+		log.Printf("Shadow:  %s:%s", p.config.ShadowHost, p.config.ShadowPort)
+	}
 	if logger != nil {
 		log.Printf("Query logging enabled (GCS bucket: %s)", logger.bucket)
 	}
@@ -132,7 +135,34 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 		return
 	}
 
-	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger)
+	shadow := p.startShadowWorker(startup, logger)
+	if shadow != nil {
+		defer shadow.Close()
+	}
+
+	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger, shadow)
+}
+
+// startShadowWorker dials + auths the shadow backend (best-effort). Returns
+// nil if SHADOW_HOST is unset or the shadow connection fails — the primary
+// path keeps running either way.
+func (p *PgProxy) startShadowWorker(startup *PgPacket, logger *QueryLogger) *PgShadowWorker {
+	if p.config.ShadowHost == "" {
+		return nil
+	}
+	params := parseStartupParams(startup)
+	dbname := params["database"]
+	sw := NewPgShadowWorker(p.config, logger)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := sw.Initialize(ctx, dbname); err != nil {
+		log.Printf("PgProxy: shadow init failed, continuing primary-only: %v", err)
+		connectionsWithoutShadow.Inc()
+		return nil
+	}
+	connectionsWithShadow.Inc()
+	debugf(p.config, "PgProxy: shadow worker ready (db=%s)", dbname)
+	return sw
 }
 
 // forwardStartup handles the client-side startup phase: loops on libpq's
@@ -251,7 +281,7 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 // Messages that don't trigger a response (Parse, Bind, Execute alone, Describe,
 // Close, Flush) are forwarded without waiting; their timing is reported as just
 // the write latency (essentially zero).
-func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logger *QueryLogger) {
+func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logger *QueryLogger, shadow *PgShadowWorker) {
 	for {
 		msg, err := ReadMessage(client)
 		if err != nil {
@@ -291,6 +321,14 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 		bytesTotal.WithLabelValues("primary", "sent").Add(float64(nWritten))
 		if isPgCountableQuery(msg.Type) {
 			queryTotal.WithLabelValues("primary").Inc()
+		}
+
+		if shadow != nil && msg.Type != pgMsgTerminate {
+			shadow.Send(pgShadowFrame{
+				req:             req,
+				payload:         append([]byte(nil), msg.Bytes()...),
+				expectsResponse: msg.Type == pgMsgQuery || msg.Type == pgMsgSync,
+			})
 		}
 
 		if msg.Type == pgMsgTerminate {

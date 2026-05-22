@@ -36,7 +36,7 @@ func runPostgresProxy(config *Config) {
 	log.Printf("  Listener TLS:       %v", config.TLSEnabled)
 	log.Printf("  Backend TLS:        %v (insecure_skip_verify=%v)", config.PrimaryTLSEnabled, config.PrimaryTLSInsecureSkipVerify)
 	if config.ShadowHost != "" {
-		log.Printf("  Shadow (configured but not yet wired in PR #1): %s:%s", config.ShadowHost, config.ShadowPort)
+		log.Printf("  Shadow:             %s:%s (tls=%v)", config.ShadowHost, config.ShadowPort, config.ShadowTLSEnabled)
 	}
 	log.Printf("  Query Log GCS Bucket: %s", config.QueryLogGCSBucket)
 	if config.QueryLogGCSBucket != "" {

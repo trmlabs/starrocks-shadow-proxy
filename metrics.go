@@ -201,7 +201,7 @@ func init() {
 			Help: "Current depth of the shadow queue (sum across all connections)",
 		},
 		func() float64 {
-			return float64(getQueueDepth())
+			return float64(getQueueDepth() + getPgShadowQueueDepth())
 		},
 	))
 	prometheus.MustRegister(connectionFailures)
