@@ -55,11 +55,19 @@ func runPostgresProxy(config *Config) {
 	}
 
 	primaryAddr := fmt.Sprintf("%s:%s", config.PrimaryHost, config.PrimaryPort)
+	var shadowAddr string
+	if config.ShadowHost != "" {
+		shadowAddr = fmt.Sprintf("%s:%s", config.ShadowHost, config.ShadowPort)
+	}
 
-	// Health-check goroutine: pings the primary every 10s.
+	// Health-check goroutine: pings the primary every 10s, plus the shadow
+	// when SHADOW_HOST is set. Mirrors main.go's mysql health checker so
+	// shadow_proxy_shadow_up / shadow_proxy_primary_up are populated for
+	// alerting on the gauges (which key off the gauges, not the protocol).
 	var (
 		healthMu       sync.RWMutex
 		primaryHealthy bool
+		shadowHealthy  bool
 	)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
@@ -68,15 +76,30 @@ func runPostgresProxy(config *Config) {
 		check := func() {
 			conn, err := net.DialTimeout("tcp", primaryAddr, 3*time.Second)
 			healthMu.Lock()
-			defer healthMu.Unlock()
 			if err != nil {
 				primaryHealthy = false
 				primaryUp.Set(0)
+			} else {
+				primaryHealthy = true
+				primaryUp.Set(1)
+				conn.Close()
+			}
+			healthMu.Unlock()
+
+			if shadowAddr == "" {
 				return
 			}
-			primaryHealthy = true
-			primaryUp.Set(1)
-			conn.Close()
+			conn, err = net.DialTimeout("tcp", shadowAddr, 3*time.Second)
+			healthMu.Lock()
+			if err != nil {
+				shadowHealthy = false
+				shadowUp.Set(0)
+			} else {
+				shadowHealthy = true
+				shadowUp.Set(1)
+				conn.Close()
+			}
+			healthMu.Unlock()
 		}
 		check()
 		for range ticker.C {
@@ -106,10 +129,17 @@ func runPostgresProxy(config *Config) {
 		})
 		mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 			healthMu.RLock()
-			ok := primaryHealthy
+			primaryOK := primaryHealthy
+			shadowOK := shadowHealthy
 			healthMu.RUnlock()
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"primary": {"address": "%s", "healthy": %v}}`, primaryAddr, ok)
+			if shadowAddr == "" {
+				_, _ = fmt.Fprintf(w, `{"primary": {"address": "%s", "healthy": %v}}`, primaryAddr, primaryOK)
+				return
+			}
+			_, _ = fmt.Fprintf(w,
+				`{"primary": {"address": "%s", "healthy": %v}, "shadow": {"address": "%s", "healthy": %v}}`,
+				primaryAddr, primaryOK, shadowAddr, shadowOK)
 		})
 		// pprof handlers on the same mux as /metrics, not DefaultServeMux.
 		mux.HandleFunc("/debug/pprof/", pprof.Index)
