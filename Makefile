@@ -59,6 +59,26 @@ test-pg-local-up:
 test-pg-local-down:
 	docker-compose -f docker-compose.pg.yaml down -v
 
+# Start local TLS-required Postgres test environment (mirrors AlloyDB posture).
+# Used to develop the proxy's TLS-termination path locally without round-trips
+# through GitHub Actions. Requires self-signed certs (run ./certs/generate-certs.sh
+# once before this target).
+test-pg-local-tls:
+	./test-pg-local-tls.sh
+
+# Same as test-pg-local-tls but leaves the stack running for manual iteration.
+test-pg-local-tls-up:
+	./test-pg-local-tls.sh --keep
+
+# Run only the direct-backend phases; useful while TLS termination is being
+# implemented and the proxy is expected to fail.
+test-pg-local-tls-backends:
+	./test-pg-local-tls.sh --skip-proxy --keep
+
+# Stop the TLS Postgres test environment.
+test-pg-local-tls-down:
+	docker-compose -f docker-compose.pg-tls.yaml down -v
+
 # Manual integration test against local environment
 test-integration:
 	@echo "Starting test environment..."
@@ -129,9 +149,13 @@ help:
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  test-local         - Start local test environment (StarRocks/MySQL)"
 	@echo "  test-local-down    - Stop local test environment (StarRocks/MySQL)"
-	@echo "  test-pg-local      - Run Postgres smoke test (compose up + assertions + tear down)"
-	@echo "  test-pg-local-up   - Start Postgres test environment and leave running"
-	@echo "  test-pg-local-down - Stop Postgres test environment"
+	@echo "  test-pg-local              - Run Postgres smoke test (compose up + assertions + tear down)"
+	@echo "  test-pg-local-up           - Start Postgres test environment and leave running"
+	@echo "  test-pg-local-down         - Stop Postgres test environment"
+	@echo "  test-pg-local-tls          - Run TLS-required Postgres smoke test (mirrors AlloyDB posture)"
+	@echo "  test-pg-local-tls-up       - Start TLS Postgres test environment and leave running"
+	@echo "  test-pg-local-tls-backends - Direct-backend TLS phases only (proxy expected to fail)"
+	@echo "  test-pg-local-tls-down     - Stop TLS Postgres test environment"
 	@echo "  test-integration   - Run full integration test"
 	@echo "  test-filter        - Run filter integration test (Docker)"
 	@echo "  docker-build       - Build Linux binary + Docker image (amd64)"

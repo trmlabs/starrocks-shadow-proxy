@@ -1,5 +1,6 @@
 # Build artifacts
 starrocks-shadow-proxy
+starrocks-shadow-proxy-linux-*
 coverage.out
 coverage.html
 

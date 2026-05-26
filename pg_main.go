@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -32,14 +33,25 @@ func runPostgresProxy(config *Config) {
 	log.Printf("  Protocol:           %s", config.Protocol)
 	log.Printf("  Listen Addr:        %s", config.ListenAddr)
 	log.Printf("  Primary:            %s:%s", config.PrimaryHost, config.PrimaryPort)
+	log.Printf("  Listener TLS:       %v", config.TLSEnabled)
+	log.Printf("  Backend TLS:        %v (insecure_skip_verify=%v)", config.PrimaryTLSEnabled, config.PrimaryTLSInsecureSkipVerify)
 	if config.ShadowHost != "" {
-		log.Printf("  Shadow (configured but not yet wired in PR #1): %s:%s", config.ShadowHost, config.ShadowPort)
+		log.Printf("  Shadow:             %s:%s (tls=%v)", config.ShadowHost, config.ShadowPort, config.ShadowTLSEnabled)
 	}
 	log.Printf("  Query Log GCS Bucket: %s", config.QueryLogGCSBucket)
 	if config.QueryLogGCSBucket != "" {
 		log.Printf("  Query Log GCS Prefix:   %s", config.QueryLogGCSPrefix)
 		log.Printf("  Query Log Flush Interval: %v", config.QueryLogFlushInterval)
 		log.Printf("  Query Log Batch Size:   %d", config.QueryLogBatchSize)
+	}
+
+	listenerTLSConfig, err := loadListenerTLSConfig(config)
+	if err != nil {
+		log.Fatalf("Listener TLS config: %v", err)
+	}
+	backendTLSConfig, err := loadBackendTLSConfig(config)
+	if err != nil {
+		log.Fatalf("Backend TLS config: %v", err)
 	}
 
 	primaryAddr := fmt.Sprintf("%s:%s", config.PrimaryHost, config.PrimaryPort)
@@ -99,6 +111,12 @@ func runPostgresProxy(config *Config) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"primary": {"address": "%s", "healthy": %v}}`, primaryAddr, ok)
 		})
+		// pprof handlers on the same mux as /metrics, not DefaultServeMux.
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 		server := &http.Server{
 			Addr:         config.MetricsPort,
 			Handler:      mux,
@@ -111,6 +129,19 @@ func runPostgresProxy(config *Config) {
 			log.Printf("Metrics server error: %v", err)
 		}
 	}()
+
+	// Selective shadow mirroring (SHADOW_FILTER_MODE / SHADOW_FILTER_SQL_OPERATIONS /
+	// SHADOW_FILTER_PATTERNS / SHADOW_SAMPLE_RATE). Done BEFORE the GCS query
+	// logger so a filter-construction failure exits cleanly (no defer-leak).
+	queryFilter, err := NewQueryFilter(config)
+	if err != nil {
+		log.Fatalf("Failed to create query filter: %v", err)
+	}
+	if queryFilter != nil {
+		log.Printf("  Shadow Query Filter: %s", queryFilter)
+	} else {
+		log.Printf("  Shadow Query Filter: disabled (mirroring all SQL-carrying frames)")
+	}
 
 	// Optional GCS query logger.
 	var queryLogger *QueryLogger
@@ -133,7 +164,8 @@ func runPostgresProxy(config *Config) {
 		}
 	}
 
-	proxy := NewPgProxy(config)
+	proxy := NewPgProxy(config, listenerTLSConfig, backendTLSConfig)
+	proxy.queryFilter = queryFilter
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

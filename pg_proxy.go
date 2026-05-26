@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"crypto/md5"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -36,16 +37,21 @@ const (
 	pgBackendCopyBothResponse byte = 'W'
 )
 
-// PgProxy is a pgwire transparent forwarder.
+// PgProxy is a pgwire transparent forwarder with optional TLS on either hop.
 type PgProxy struct {
 	config      *Config
 	primaryAddr string
+	listenerTLS *tls.Config  // nil → client TLS not terminated
+	backendTLS  *tls.Config  // nil → backend dialed plaintext
+	queryFilter *QueryFilter // nil → mirror every SQL-carrying frame to the shadow
 }
 
-func NewPgProxy(config *Config) *PgProxy {
+func NewPgProxy(config *Config, listenerTLS, backendTLS *tls.Config) *PgProxy {
 	return &PgProxy{
 		config:      config,
 		primaryAddr: fmt.Sprintf("%s:%s", config.PrimaryHost, config.PrimaryPort),
+		listenerTLS: listenerTLS,
+		backendTLS:  backendTLS,
 	}
 }
 
@@ -57,8 +63,11 @@ func (p *PgProxy) Start(ctx context.Context, logger *QueryLogger) error {
 	}
 	defer listener.Close()
 
-	log.Printf("PgProxy listening on %s (plain TCP, no shadow yet)", p.config.ListenAddr)
+	log.Printf("PgProxy listening on %s", p.config.ListenAddr)
 	log.Printf("Primary: %s", p.primaryAddr)
+	if p.config.ShadowHost != "" {
+		log.Printf("Shadow:  %s:%s", p.config.ShadowHost, p.config.ShadowPort)
+	}
 	if logger != nil {
 		log.Printf("Query logging enabled (GCS bucket: %s)", logger.bucket)
 	}
@@ -100,73 +109,110 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 	}
 	defer primary.Close()
 
-	startup, err := p.forwardStartup(client, primary)
+	// Backend TLS must be established before any pgwire framing.
+	var primaryConn net.Conn = primary
+	if p.backendTLS != nil {
+		tlsConn, err := upgradeBackendTLS(primary, p.backendTLS)
+		if err != nil {
+			log.Printf("PgProxy: backend TLS upgrade failed: %v", err)
+			tlsFailures.Inc()
+			return
+		}
+		primaryConn = tlsConn
+		debugf(p.config, "PgProxy: backend TLS established to %s", p.primaryAddr)
+	}
+
+	clientConn, startup, err := p.forwardStartup(client, primaryConn)
 	if err != nil {
 		debugf(p.config, "PgProxy: startup err: %v", err)
 		return
 	}
 	if startup == nil {
-		// CancelRequest: server processes and closes the connection.
 		return
 	}
 
-	if err := p.forwardAuthPhase(client, primary); err != nil {
+	if err := p.forwardAuthPhase(clientConn, primaryConn); err != nil {
 		debugf(p.config, "PgProxy: auth phase err: %v", err)
 		return
 	}
 
-	p.runQueryLoop(client, primary, clientAddr, logger)
+	shadow := p.startShadowWorker(startup, logger)
+	if shadow != nil {
+		defer shadow.Close()
+	}
+
+	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger, shadow)
 }
 
-// forwardStartup forwards the client's first message (StartupMessage / SSLRequest /
-// GSSENCRequest / CancelRequest) to the primary. Returns the StartupMessage that
-// will be in effect for the rest of the session, or nil if the connection should
-// be closed (CancelRequest).
-//
-// libpq's default negotiation can send TWO probe messages before the
-// StartupMessage:
-//
-//   - gssencmode=prefer (default): send GSSENCRequest first.
-//   - sslmode=prefer (default):    send SSLRequest after GSSENC is declined.
-//
-// We loop on the probe messages and only stop once the server has acknowledged
-// 'N' to whichever probe was last sent and the client follows up with the real
-// StartupMessage. If the server agrees to SSL/GSS ('S'), we bail — terminating
-// TLS at the proxy is out of scope for MVP. Configure clients with
-// `sslmode=disable gssencmode=disable` to avoid those probes entirely.
-func (p *PgProxy) forwardStartup(client, primary net.Conn) (*PgPacket, error) {
+// startShadowWorker dials + auths the shadow backend (best-effort). Returns
+// nil if SHADOW_HOST is unset or the shadow connection fails — the primary
+// path keeps running either way.
+func (p *PgProxy) startShadowWorker(startup *PgPacket, logger *QueryLogger) *PgShadowWorker {
+	if p.config.ShadowHost == "" {
+		return nil
+	}
+	params := parseStartupParams(startup)
+	dbname := params["database"]
+	sw := NewPgShadowWorker(p.config, logger)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := sw.Initialize(ctx, dbname); err != nil {
+		log.Printf("PgProxy: shadow init failed, continuing primary-only: %v", err)
+		connectionsWithoutShadow.Inc()
+		return nil
+	}
+	connectionsWithShadow.Inc()
+	debugf(p.config, "PgProxy: shadow worker ready (db=%s)", dbname)
+	return sw
+}
+
+// forwardStartup handles the client-side startup phase: loops on libpq's
+// GSSENCRequest / SSLRequest probes (terminating TLS if listenerTLS is set),
+// then forwards the real StartupMessage to the backend. Returns the
+// (possibly TLS-upgraded) client conn and the StartupMessage in effect, or
+// (conn, nil, nil) if the client sent a CancelRequest.
+func (p *PgProxy) forwardStartup(client, primary net.Conn) (net.Conn, *PgPacket, error) {
 	for {
 		startup, err := ReadStartupMessage(client)
 		if err != nil {
-			return nil, fmt.Errorf("read startup from client: %w", err)
+			return client, nil, fmt.Errorf("read startup from client: %w", err)
 		}
 
-		if _, err := primary.Write(startup.Payload); err != nil {
-			return nil, fmt.Errorf("forward startup to primary: %w", err)
-		}
-
-		if IsSSLRequest(startup) || IsGSSENCRequest(startup) {
-			resp := make([]byte, 1)
-			if _, err := io.ReadFull(primary, resp); err != nil {
-				return nil, fmt.Errorf("read SSL/GSSENC response: %w", err)
+		switch {
+		case IsSSLRequest(startup):
+			if p.listenerTLS != nil {
+				tlsConn, err := upgradeClientTLS(client, p.listenerTLS)
+				if err != nil {
+					tlsFailures.Inc()
+					return client, nil, err
+				}
+				debugf(p.config, "PgProxy: client TLS terminated")
+				client = tlsConn
+				continue
 			}
-			if _, err := client.Write(resp); err != nil {
-				return nil, fmt.Errorf("forward SSL/GSSENC response: %w", err)
+			if _, err := client.Write([]byte{'N'}); err != nil {
+				return client, nil, fmt.Errorf("write 'N' SSL reject to client: %w", err)
 			}
-			if resp[0] == 'S' {
-				tlsFailures.Inc()
-				return nil, fmt.Errorf("server agreed to SSL/GSS; proxy does not terminate TLS in MVP — connect with sslmode=disable gssencmode=disable")
-			}
-			// 'N' or 'E' — the client may follow up with another probe (SSLRequest
-			// after GSSENC was declined) or the real StartupMessage. Loop.
 			continue
+
+		case IsGSSENCRequest(startup):
+			if _, err := client.Write([]byte{'N'}); err != nil {
+				return client, nil, fmt.Errorf("write 'N' GSSENC reject to client: %w", err)
+			}
+			continue
+
+		case IsCancelRequest(startup):
+			if _, err := primary.Write(startup.Payload); err != nil {
+				return client, nil, fmt.Errorf("forward cancel to primary: %w", err)
+			}
+			return client, nil, nil
 		}
 
-		if IsCancelRequest(startup) {
-			return nil, nil
+		// Real StartupMessage — forward to the (possibly TLS-wrapped) primary.
+		if _, err := primary.Write(startup.Payload); err != nil {
+			return client, nil, fmt.Errorf("forward startup to primary: %w", err)
 		}
-
-		return startup, nil
+		return client, startup, nil
 	}
 }
 
@@ -236,7 +282,7 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 // Messages that don't trigger a response (Parse, Bind, Execute alone, Describe,
 // Close, Flush) are forwarded without waiting; their timing is reported as just
 // the write latency (essentially zero).
-func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logger *QueryLogger) {
+func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logger *QueryLogger, shadow *PgShadowWorker) {
 	for {
 		msg, err := ReadMessage(client)
 		if err != nil {
@@ -276,6 +322,25 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 		bytesTotal.WithLabelValues("primary", "sent").Add(float64(nWritten))
 		if isPgCountableQuery(msg.Type) {
 			queryTotal.WithLabelValues("primary").Inc()
+		}
+
+		if shadow != nil && msg.Type != pgMsgTerminate {
+			// Filter SQL-carrying frames (Query, Parse) against the configured
+			// SHADOW_FILTER_*/SHADOW_SAMPLE_RATE policy before enqueuing. Other
+			// frames (Bind, Execute, Sync, etc.) pass through unconditionally to
+			// keep the shadow's prepared-statement lifecycle in sync.
+			allowed, filterReason := shouldShadowMirror(req, p.queryFilter)
+			if !allowed {
+				shadowFilteredTotal.WithLabelValues(filterReason).Inc()
+				debugf(p.config, "PgProxy: shadow frame filtered (%s): %s", filterReason, req.Command)
+				p.logFilteredShadow(logger, req, filterReason)
+			} else {
+				shadow.Send(pgShadowFrame{
+					req:             req,
+					payload:         append([]byte(nil), msg.Bytes()...),
+					expectsResponse: msg.Type == pgMsgQuery || msg.Type == pgMsgSync,
+				})
+			}
 		}
 
 		if msg.Type == pgMsgTerminate {
@@ -371,5 +436,29 @@ func (p *PgProxy) logEntry(logger *QueryLogger, req QueryRequest, bytesSent, byt
 		Success:    err == nil,
 		Error:      errorString(err),
 		ClientAddr: req.ClientAddr,
+	})
+}
+
+// logFilteredShadow writes a target=shadow log entry for a frame that was
+// filtered out of mirroring. Mirrors the MySQL path's logFilteredShadow so the
+// BigQuery view of shadow vs. primary stays one-to-one.
+func (p *PgProxy) logFilteredShadow(logger *QueryLogger, req QueryRequest, filterReason string) {
+	if logger == nil {
+		return
+	}
+	logger.Log(QueryLogEntry{
+		Timestamp:    time.Now().UTC().Format(time.RFC3339Nano),
+		QueryID:      req.ID,
+		Target:       "shadow",
+		Command:      req.Command,
+		QueryText:    req.QueryText,
+		QueryHash:    req.QueryHash,
+		DurationMs:   0,
+		BytesSent:    0,
+		BytesRecv:    0,
+		Success:      true,
+		ClientAddr:   req.ClientAddr,
+		Filtered:     true,
+		FilterReason: filterReason,
 	})
 }

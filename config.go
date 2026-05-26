@@ -26,10 +26,14 @@ type Config struct {
 	ShadowUser      string
 	ShadowPassword  string
 	MetricsPort     string
-	// TLS configuration for client connections (proxy as server)
+	// Listener-side TLS (proxy as server)
 	TLSEnabled  bool
 	TLSCertFile string
 	TLSKeyFile  string
+	// Backend-side TLS (proxy as client). Required against AlloyDB.
+	PrimaryTLSEnabled            bool
+	PrimaryTLSCAFile             string
+	PrimaryTLSInsecureSkipVerify bool
 	// Shadow queue and timeout configuration
 	ShadowQueueSize            int
 	ShadowReadTimeout          time.Duration
@@ -86,20 +90,23 @@ func loadConfig() *Config {
 	}
 
 	return &Config{
-		Protocol:        protocol,
-		ListenAddr:      getEnv("LISTEN_ADDR", defaultListen),
-		PrimaryHost:     getEnv("PRIMARY_HOST", ""),
-		PrimaryPort:     getEnv("PRIMARY_PORT", defaultBackendPort),
-		PrimaryUser:     getEnv("PRIMARY_USER", "root"),
-		PrimaryPassword: getEnv("PRIMARY_PASSWORD", ""),
-		ShadowHost:      getEnv("SHADOW_HOST", ""),
-		ShadowPort:      getEnv("SHADOW_PORT", defaultBackendPort),
-		ShadowUser:      getEnv("SHADOW_USER", "root"),
-		ShadowPassword:  getEnv("SHADOW_PASSWORD", ""),
-		MetricsPort:     getEnv("METRICS_PORT", ":9090"),
-		TLSEnabled:      tlsEnabled,
-		TLSCertFile:     getEnv("TLS_CERT_FILE", "/certs/tls.crt"),
-		TLSKeyFile:      getEnv("TLS_KEY_FILE", "/certs/tls.key"),
+		Protocol:                     protocol,
+		ListenAddr:                   getEnv("LISTEN_ADDR", defaultListen),
+		PrimaryHost:                  getEnv("PRIMARY_HOST", ""),
+		PrimaryPort:                  getEnv("PRIMARY_PORT", defaultBackendPort),
+		PrimaryUser:                  getEnv("PRIMARY_USER", "root"),
+		PrimaryPassword:              getEnv("PRIMARY_PASSWORD", ""),
+		ShadowHost:                   getEnv("SHADOW_HOST", ""),
+		ShadowPort:                   getEnv("SHADOW_PORT", defaultBackendPort),
+		ShadowUser:                   getEnv("SHADOW_USER", "root"),
+		ShadowPassword:               getEnv("SHADOW_PASSWORD", ""),
+		MetricsPort:                  getEnv("METRICS_PORT", ":9090"),
+		TLSEnabled:                   tlsEnabled,
+		TLSCertFile:                  getEnv("TLS_CERT_FILE", "/certs/tls.crt"),
+		TLSKeyFile:                   getEnv("TLS_KEY_FILE", "/certs/tls.key"),
+		PrimaryTLSEnabled:            getEnv("PRIMARY_TLS_ENABLED", "false") == "true",
+		PrimaryTLSCAFile:             getEnv("PRIMARY_TLS_CA_FILE", ""),
+		PrimaryTLSInsecureSkipVerify: getEnv("PRIMARY_TLS_INSECURE_SKIP_VERIFY", "false") == "true",
 		// Shadow queue and timeout configuration (with sensible defaults)
 		ShadowQueueSize:            getEnvInt("SHADOW_QUEUE_SIZE", 10000),
 		ShadowReadTimeout:          time.Duration(getEnvInt("SHADOW_READ_TIMEOUT_SECONDS", 30)) * time.Second,

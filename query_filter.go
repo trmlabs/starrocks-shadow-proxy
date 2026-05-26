@@ -89,10 +89,13 @@ const (
 
 // Allow returns true if the query should be sent to the shadow cluster, along
 // with the reason if filtered. The reason is one of the FilterReason* constants.
-// Non-COM_QUERY commands always pass through to avoid desyncing the shadow
-// session (USE database, prepared statement lifecycle, etc.).
+// Commands that don't carry SQL text (MySQL: COM_PING, COM_INIT_DB, prepared-stmt
+// lifecycle; pgwire: Bind/Execute/Sync/etc.) always pass through to avoid
+// desyncing the shadow session. We key off req.QueryText being empty, which is
+// protocol-agnostic: NewQueryRequest only populates it for COM_QUERY on the
+// MySQL path, and extractPgQueryText only populates it for Query/Parse on pg.
 func (f *QueryFilter) Allow(req QueryRequest) (bool, string) {
-	if req.Command != "COM_QUERY" || req.QueryText == "" {
+	if req.QueryText == "" {
 		return true, FilterReasonNone
 	}
 
