@@ -151,7 +151,20 @@ func runPostgresProxy(config *Config) {
 		}
 	}
 
+	// Selective shadow mirroring (SHADOW_FILTER_MODE / SHADOW_FILTER_SQL_OPERATIONS /
+	// SHADOW_FILTER_PATTERNS / SHADOW_SAMPLE_RATE). Mirrors the MySQL bootstrap.
+	queryFilter, err := NewQueryFilter(config)
+	if err != nil {
+		log.Fatalf("Failed to create query filter: %v", err)
+	}
+	if queryFilter != nil {
+		log.Printf("  Shadow Query Filter: %s", queryFilter)
+	} else {
+		log.Printf("  Shadow Query Filter: disabled (mirroring all SQL-carrying frames)")
+	}
+
 	proxy := NewPgProxy(config, listenerTLSConfig, backendTLSConfig)
+	proxy.queryFilter = queryFilter
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

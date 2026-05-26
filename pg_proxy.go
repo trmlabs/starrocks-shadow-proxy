@@ -41,8 +41,9 @@ const (
 type PgProxy struct {
 	config      *Config
 	primaryAddr string
-	listenerTLS *tls.Config // nil → client TLS not terminated
-	backendTLS  *tls.Config // nil → backend dialed plaintext
+	listenerTLS *tls.Config  // nil → client TLS not terminated
+	backendTLS  *tls.Config  // nil → backend dialed plaintext
+	queryFilter *QueryFilter // nil → mirror every SQL-carrying frame to the shadow
 }
 
 func NewPgProxy(config *Config, listenerTLS, backendTLS *tls.Config) *PgProxy {
@@ -324,11 +325,22 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 		}
 
 		if shadow != nil && msg.Type != pgMsgTerminate {
-			shadow.Send(pgShadowFrame{
-				req:             req,
-				payload:         append([]byte(nil), msg.Bytes()...),
-				expectsResponse: msg.Type == pgMsgQuery || msg.Type == pgMsgSync,
-			})
+			// Filter SQL-carrying frames (Query, Parse) against the configured
+			// SHADOW_FILTER_*/SHADOW_SAMPLE_RATE policy before enqueuing. Other
+			// frames (Bind, Execute, Sync, etc.) pass through unconditionally to
+			// keep the shadow's prepared-statement lifecycle in sync.
+			allowed, filterReason := shouldShadowMirror(req, p.queryFilter)
+			if !allowed {
+				shadowFilteredTotal.WithLabelValues(filterReason).Inc()
+				debugf(p.config, "PgProxy: shadow frame filtered (%s): %s", filterReason, req.Command)
+				p.logFilteredShadow(logger, req, filterReason)
+			} else {
+				shadow.Send(pgShadowFrame{
+					req:             req,
+					payload:         append([]byte(nil), msg.Bytes()...),
+					expectsResponse: msg.Type == pgMsgQuery || msg.Type == pgMsgSync,
+				})
+			}
 		}
 
 		if msg.Type == pgMsgTerminate {
@@ -424,5 +436,29 @@ func (p *PgProxy) logEntry(logger *QueryLogger, req QueryRequest, bytesSent, byt
 		Success:    err == nil,
 		Error:      errorString(err),
 		ClientAddr: req.ClientAddr,
+	})
+}
+
+// logFilteredShadow writes a target=shadow log entry for a frame that was
+// filtered out of mirroring. Mirrors the MySQL path's logFilteredShadow so the
+// BigQuery view of shadow vs. primary stays one-to-one.
+func (p *PgProxy) logFilteredShadow(logger *QueryLogger, req QueryRequest, filterReason string) {
+	if logger == nil {
+		return
+	}
+	logger.Log(QueryLogEntry{
+		Timestamp:    time.Now().UTC().Format(time.RFC3339Nano),
+		QueryID:      req.ID,
+		Target:       "shadow",
+		Command:      req.Command,
+		QueryText:    req.QueryText,
+		QueryHash:    req.QueryHash,
+		DurationMs:   0,
+		BytesSent:    0,
+		BytesRecv:    0,
+		Success:      true,
+		ClientAddr:   req.ClientAddr,
+		Filtered:     true,
+		FilterReason: filterReason,
 	})
 }
