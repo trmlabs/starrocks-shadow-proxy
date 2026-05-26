@@ -67,6 +67,8 @@ TLS:
 | `PRIMARY_TLS_ENABLED` | `false` | Backend-side TLS initiation. Required against AlloyDB. |
 | `PRIMARY_TLS_CA_FILE` | `""` | PEM bundle for verifying the backend cert. Empty = system roots. |
 | `PRIMARY_TLS_INSECURE_SKIP_VERIFY` | `false` | Dev only (self-signed). Must be `false` in production. |
+| `SHADOW_TLS_ENABLED` | `false` | TLS for the shadow hop (proxy → shadow backend). |
+| `SHADOW_TLS_INSECURE` | `false` | Skip cert verification on the shadow hop. Dev/staging only — startup logs a `WARNING` when set to `true`. |
 
 Vault integration for secrets is a deployment concern — the proxy reads plain env vars. Wire `PRIMARY_PASSWORD` / `SHADOW_PASSWORD` from a Vault Agent sidecar or a Kubernetes secret synced from Vault.
 

@@ -422,7 +422,7 @@ QUERY_LOG_BATCH_SIZE=1000
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SHADOW_TLS_ENABLED` | Enable TLS for shadow connections | `false` |
-| `SHADOW_TLS_INSECURE` | Skip certificate verification (dev only) | `true` |
+| `SHADOW_TLS_INSECURE` | Skip certificate verification (dev only — startup logs a WARNING when true) | `false` |
 
 ### Shadow Queue & Timeout Settings
 

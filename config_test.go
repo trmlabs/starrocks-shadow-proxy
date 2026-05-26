@@ -133,6 +133,40 @@ func TestQueryLogConfigDefaults(t *testing.T) {
 	}
 }
 
+// TestShadowTLSInsecureDefaultsFalse asserts SHADOW_TLS_INSECURE defaults to
+// false. The default flipped in the Pedro-review follow-up — see config.go.
+//
+// Rationale: a misconfigured prod deploy with SHADOW_TLS_ENABLED=true and the
+// old default (true) silently disabled cert verification on the shadow hop.
+// The new default (false) makes the failure loud; dev/staging opt in
+// explicitly.
+func TestShadowTLSInsecureDefaultsFalse(t *testing.T) {
+	os.Unsetenv("SHADOW_TLS_INSECURE")
+	if v := getEnv("SHADOW_TLS_INSECURE", "false"); v != "false" {
+		t.Errorf("getEnv(SHADOW_TLS_INSECURE) default = %q, want %q", v, "false")
+	}
+
+	os.Setenv("PRIMARY_HOST", "localhost")
+	os.Setenv("SHADOW_HOST", "localhost")
+	defer func() {
+		os.Unsetenv("PRIMARY_HOST")
+		os.Unsetenv("SHADOW_HOST")
+	}()
+
+	cfg := loadConfig()
+	if cfg.ShadowTLSInsecure {
+		t.Errorf("expected ShadowTLSInsecure=false by default, got true")
+	}
+
+	// Explicit opt-in still works.
+	os.Setenv("SHADOW_TLS_INSECURE", "true")
+	defer os.Unsetenv("SHADOW_TLS_INSECURE")
+	cfg = loadConfig()
+	if !cfg.ShadowTLSInsecure {
+		t.Errorf("expected ShadowTLSInsecure=true when SHADOW_TLS_INSECURE=true")
+	}
+}
+
 // TestDebugLogConfig tests the DEBUG_LOG configuration flag
 func TestDebugLogConfig(t *testing.T) {
 	os.Setenv("PRIMARY_HOST", "localhost")
