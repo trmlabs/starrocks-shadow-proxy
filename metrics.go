@@ -113,6 +113,19 @@ var (
 			Help: "Total number of shadow write errors",
 		},
 	)
+	// shadowDropped counts frames a worker rejected without enqueuing. Today
+	// the only labeled reason is conn_dead — the worker latched its dead flag
+	// after a write/read I/O error and is dropping the remainder of the
+	// client session's frames instead of retrying on a poisoned socket. Kept
+	// separate from shadow_proxy_queue_drops so the noise-floor distinction
+	// between "queue full" and "backend gone" stays usable during the cutover.
+	shadowDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_shadow_dropped_total",
+			Help: "Total number of shadow frames dropped without enqueue",
+		},
+		[]string{"reason"}, // "conn_dead"
+	)
 	totalConnections = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "shadow_proxy_connections_total",
@@ -211,6 +224,7 @@ func init() {
 	prometheus.MustRegister(shadowReadTimeouts)
 	prometheus.MustRegister(shadowDrainTimeouts)
 	prometheus.MustRegister(shadowWriteErrors)
+	prometheus.MustRegister(shadowDropped)
 	prometheus.MustRegister(totalConnections)
 	prometheus.MustRegister(connectionsWithShadow)
 	// Shadow filter metrics
