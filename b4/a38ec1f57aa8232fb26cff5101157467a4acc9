@@ -1,0 +1,38 @@
+pg_proxy.go
+  s_b85ea4f08807a3::t_fbe3543edd9dd8 396,398-406,408
+  s_b85ea4f08807a3::t_29aa8b0e700778 299
+  s_b85ea4f08807a3::t_8da1503d604f65 148-150
+pg_protocol.go
+  s_b85ea4f08807a3::t_7b10126882687c 184-185
+  s_b85ea4f08807a3::t_3977bf3b0422ec 219
+  s_b85ea4f08807a3::t_30c21dd4cd9393 170-171
+  s_b85ea4f08807a3::t_36fc218182482a 204
+pg_shadow_worker.go
+  s_b85ea4f08807a3::t_af62737e11e12d 31-32
+  s_b85ea4f08807a3::t_19256e1ee3906e 254
+pg_shadow_filter.go
+  s_b85ea4f08807a3::t_ad9f14005602ac 1-3,6-7
+query_filter.go
+  s_b85ea4f08807a3::t_eefbd2f14fc79f 116
+  s_b85ea4f08807a3::t_dd1bcc2a7ff3ed 127
+pg_main.go
+  s_b85ea4f08807a3::t_1212fb77a73853 63
+config.go
+  s_b85ea4f08807a3::t_46a7ce75dda8ff 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b4a38ec1f57aa8232fb26cff5101157467a4acc9",
+  "prompts": {},
+  "sessions": {
+    "s_b85ea4f08807a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "286f4343-6e00-4345-964b-c3a7daa7e421",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Anand Lalvani <anand.lalvani@trmlabs.com>"
+    }
+  }
+}
