@@ -282,6 +282,17 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 	}
 }
 
+// pgStickyStmtMapCap caps the per-connection filteredStmtNames map. A noisy
+// client (or one in front of pgbouncer in session pooling) can issue many
+// Parse frames with unique names that never get Close('S')'d, growing the
+// map for the lifetime of the connection. The cap bounds that growth; on
+// overflow the map is cleared, which loses sticky tracking for currently-
+// tracked Parses — Bind/Execute that arrive next will leak through to the
+// shadow as if the Parse had never been filtered, which is the same
+// graceful-degradation mode that already exists when Bind/Execute arrive
+// without a preceding tracked Parse.
+const pgStickyStmtMapCap = 4096
+
 // runQueryLoop is the steady-state request/response loop with per-query timing.
 //
 // Loop invariant: at top of loop we are in "Idle" state (last server message
@@ -415,6 +426,10 @@ func (p *PgProxy) shouldMirrorPgFrame(msg *PgPacket, req QueryRequest, filteredS
 		allowed, reason := shouldShadowMirror(req, p.queryFilter)
 		if !allowed {
 			if name := extractPgParseStmtName(msg); name != "" {
+				if len(filteredStmtNames) >= pgStickyStmtMapCap {
+					clear(filteredStmtNames)
+					pgStickyStmtMapResets.Inc()
+				}
 				filteredStmtNames[name] = struct{}{}
 			}
 		}

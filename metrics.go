@@ -176,6 +176,19 @@ var (
 		},
 		[]string{"target"},
 	)
+	// pgStickyStmtMapResets counts how many times a per-connection sticky-stmt
+	// map hit pgStickyStmtMapCap and was cleared to bound memory growth. Each
+	// reset loses sticky tracking for currently-tracked Parses (Bind/Execute
+	// for those names will leak to the shadow until a new Parse re-stickies).
+	// Alerting threshold: any non-zero rate suggests a client driver isn't
+	// issuing Close('S', …) and is likely creating unique stmt names per
+	// invocation (e.g. PREPARE … without DEALLOCATE).
+	pgStickyStmtMapResets = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_pg_sticky_stmt_map_resets_total",
+			Help: "Total times the per-connection sticky-stmt-name map was cleared after hitting its bound.",
+		},
+	)
 )
 
 // Worker registry for accurate queue depth tracking
@@ -235,4 +248,5 @@ func init() {
 	// Postgres command metrics
 	prometheus.MustRegister(pgCommands)
 	prometheus.MustRegister(pgPackets)
+	prometheus.MustRegister(pgStickyStmtMapResets)
 }

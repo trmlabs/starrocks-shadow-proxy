@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // buildParseFrame constructs a wire-format Parse 'P' frame with the given
@@ -406,5 +409,81 @@ func TestStickyByStmtName_AcrossExecutes(t *testing.T) {
 	allowed, _ = p.shouldMirrorPgFrame(exec, QueryRequest{Command: "Execute"}, filtered)
 	if !allowed {
 		t.Fatal("Execute on unrelated portal must remain pass-through after a different Parse was filtered")
+	}
+}
+
+// TestStickyByStmtName_CapResetsMap bounds the per-connection sticky-stmt
+// map. A noisy client issuing many unique-named Parse frames against an
+// exclude pattern (and never Close('S')-ing) used to grow the map for the
+// lifetime of the connection — concerning under pgbouncer's long-lived
+// backend connections. The cap clears the map on overflow; the next entry
+// proceeds. Sticky tracking for the cleared names is lost, which mirrors
+// the documented behavior of a Bind/Execute arriving without a tracked
+// Parse (see TestStickyByStmtName_PatternFilter).
+func TestStickyByStmtName_CapResetsMap(t *testing.T) {
+	cfg := &Config{
+		ShadowFilterMode:     "exclude",
+		ShadowFilterPatterns: []string{`(?i)pg_catalog\.`},
+		ShadowSampleRate:     1.0,
+	}
+	f, err := NewQueryFilter(cfg)
+	if err != nil {
+		t.Fatalf("NewQueryFilter: %v", err)
+	}
+	p := &PgProxy{config: &Config{}, queryFilter: f}
+	filtered := map[string]struct{}{}
+
+	startResets := testutil.ToFloat64(pgStickyStmtMapResets)
+
+	// Fill exactly to the cap with unique filtered Parses.
+	for i := 0; i < pgStickyStmtMapCap; i++ {
+		name := fmt.Sprintf("S_%d", i)
+		parse := buildParseFrame(name, "SELECT * FROM pg_catalog.pg_class")
+		allowed, reason := p.shouldMirrorPgFrame(parse, reqForParse(parse), filtered)
+		if allowed {
+			t.Fatalf("iter %d: filtered Parse should not be allowed", i)
+		}
+		if reason != FilterReasonPattern {
+			t.Fatalf("iter %d: reason = %q, want %q", i, reason, FilterReasonPattern)
+		}
+	}
+	if got := len(filtered); got != pgStickyStmtMapCap {
+		t.Fatalf("pre-overflow map size = %d, want %d", got, pgStickyStmtMapCap)
+	}
+	if delta := testutil.ToFloat64(pgStickyStmtMapResets) - startResets; delta != 0 {
+		t.Fatalf("unexpected resets before overflow: delta=%v", delta)
+	}
+
+	// One more filtered Parse → triggers reset, then inserts the new name.
+	overflowName := "S_overflow"
+	overflowParse := buildParseFrame(overflowName, "SELECT * FROM pg_catalog.pg_class")
+	p.shouldMirrorPgFrame(overflowParse, reqForParse(overflowParse), filtered)
+
+	if got := len(filtered); got != 1 {
+		t.Fatalf("post-reset map size = %d, want 1", got)
+	}
+	if _, ok := filtered[overflowName]; !ok {
+		t.Fatalf("overflow entry %q missing from map after reset", overflowName)
+	}
+	if delta := testutil.ToFloat64(pgStickyStmtMapResets) - startResets; delta != 1 {
+		t.Fatalf("reset counter delta = %v, want 1", delta)
+	}
+
+	// Sticky tracking for evicted names is gone: Bind for S_0 leaks through
+	// to the shadow. This is the documented degradation mode.
+	leakedBind := buildBindFrame("portal_zero", "S_0")
+	allowed, _ := p.shouldMirrorPgFrame(leakedBind, QueryRequest{Command: "Bind"}, filtered)
+	if !allowed {
+		t.Fatal("Bind for evicted-from-map name should leak through after reset")
+	}
+
+	// The surviving entry still works as a sticky filter for its own Bind.
+	stickyBind := buildBindFrame("portal_overflow", overflowName)
+	allowed, reason := p.shouldMirrorPgFrame(stickyBind, QueryRequest{Command: "Bind"}, filtered)
+	if allowed {
+		t.Fatalf("Bind for post-reset entry %q should still be sticky-filtered", overflowName)
+	}
+	if reason != FilterReasonStickyStmt {
+		t.Fatalf("post-reset sticky reason = %q, want %q", reason, FilterReasonStickyStmt)
 	}
 }
