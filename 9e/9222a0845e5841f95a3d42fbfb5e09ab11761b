@@ -1,0 +1,28 @@
+go.mod
+  s_b85ea4f08807a3::t_a8e0d36928f9b9 10,21
+pg_shadow_filter_test.go
+  s_b85ea4f08807a3::t_6ae9dd599a0bdc 5,7-8
+  s_b85ea4f08807a3::t_0b5904092ae9c4 414-489
+pg_proxy.go
+  s_b85ea4f08807a3::t_8ac849deee6a2b 285-295
+  s_b85ea4f08807a3::t_c996492280a21a 429-432
+metrics.go
+  s_b85ea4f08807a3::t_f4042fa384b419 251
+  s_b85ea4f08807a3::t_2abb0e2769ffb8 179-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9e9222a0845e5841f95a3d42fbfb5e09ab11761b",
+  "prompts": {},
+  "sessions": {
+    "s_b85ea4f08807a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "286f4343-6e00-4345-964b-c3a7daa7e421",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Anand Lalvani <anand.lalvani@trmlabs.com>"
+    }
+  }
+}
