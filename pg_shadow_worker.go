@@ -28,11 +28,8 @@ type PgShadowWorker struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	closed  bool
-	// dead latches after the first conn.Write / ReadMessage I/O error.
-	// Once set the worker stops processing further frames for this client
-	// connection — a reconnect would break the shadow's prepared-statement
-	// lifecycle anyway, so it's safer to count drops and let the next
-	// client connection get a fresh worker.
+	// dead latches on first I/O error; reconnecting mid-session would break
+	// the shadow's prepared-statement lifecycle, so we drop until next conn.
 	dead atomic.Bool
 }
 
@@ -202,9 +199,6 @@ func (w *PgShadowWorker) processFrame(frame pgShadowFrame) {
 	default:
 	}
 
-	// If a prior frame on this worker hit an I/O error, the underlying conn
-	// is poisoned — count the drop and bail rather than retrying on a dead
-	// socket and flooding logs/metrics for the rest of the session.
 	if w.dead.Load() {
 		shadowDropped.WithLabelValues("conn_dead").Inc()
 		return
@@ -257,10 +251,7 @@ func (w *PgShadowWorker) processFrame(frame pgShadowFrame) {
 	w.logExecution(frame.req, int64(nWritten), bytesRead, duration, nil)
 }
 
-// markDead latches the dead flag and closes the underlying conn so any
-// concurrent I/O unblocks immediately. Subsequent Send / processFrame calls
-// short-circuit and count drops under shadow_proxy_shadow_dropped_total.
-// Safe to call multiple times.
+// markDead latches the dead flag and closes the conn to unblock concurrent I/O. Idempotent.
 func (w *PgShadowWorker) markDead() {
 	if w.dead.Swap(true) {
 		return

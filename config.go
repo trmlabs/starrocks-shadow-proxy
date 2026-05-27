@@ -78,9 +78,7 @@ func isPostgresProtocol(protocol string) bool {
 func loadConfig() *Config {
 	tlsEnabled := getEnv("TLS_ENABLED", "false") == "true"
 	shadowTLSEnabled := getEnv("SHADOW_TLS_ENABLED", "false") == "true"
-	// Default false: certificate verification is on by default so a misconfigured
-	// prod deploy fails loud rather than silently skipping verification. Dev or
-	// staging-with-self-signed envs opt in via SHADOW_TLS_INSECURE=true.
+	// Default false so prod fails loud on a misconfigured cert rather than silently skipping verification.
 	shadowTLSInsecure := getEnv("SHADOW_TLS_INSECURE", "false") == "true"
 	if shadowTLSInsecure {
 		log.Printf("WARNING: SHADOW_TLS_INSECURE=true — backend cert verification disabled. Dev/staging only.")

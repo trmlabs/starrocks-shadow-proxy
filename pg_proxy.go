@@ -145,27 +145,14 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger, shadow)
 }
 
-// startShadowWorker dials + auths the shadow backend (best-effort). Returns
-// nil if SHADOW_HOST is unset, the shadow connection fails, or this
-// connection lost the per-connection sampling roll — the primary path keeps
-// running either way.
-//
-// Per-connection sampling: rolling once here (rather than per frame in
-// runQueryLoop) is correctness-critical. The extended query protocol splits
-// a query into Parse → Bind → Execute frames; only Parse carries QueryText.
-// A per-frame sample roll could drop the Parse while letting matching
-// Bind/Execute (with empty QueryText) ship to the shadow, which then errors
-// with "prepared statement S_N does not exist" and poisons the rest of the
-// session. One roll per client connection sidesteps that entirely.
+// startShadowWorker dials + auths the shadow backend (best-effort). Returns nil if
+// SHADOW_HOST is unset, the dial fails, or the per-connection sample roll loses.
+// Sampling is per-connection (not per-frame); see shouldMirrorPgFrame for why.
 func (p *PgProxy) startShadowWorker(startup *PgPacket, logger *QueryLogger) *PgShadowWorker {
 	if p.config.ShadowHost == "" {
 		return nil
 	}
 
-	// Per-connection sampling: if the filter has SHADOW_SAMPLE_RATE<1.0,
-	// decide once for the whole connection. A losing roll counts under
-	// shadow_proxy_shadow_filtered_total{reason="sampling"} and the rest
-	// of the session runs primary-only.
 	if p.queryFilter != nil {
 		if rate := p.queryFilter.SampleRate(); rate < 1.0 {
 			if rand.Float64() >= rate {
@@ -309,12 +296,7 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 // Close, Flush) are forwarded without waiting; their timing is reported as just
 // the write latency (essentially zero).
 func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logger *QueryLogger, shadow *PgShadowWorker) {
-	// filteredStmtNames tracks Parse frames that were filtered out of shadow
-	// mirroring (by SQL-operation or pattern filter — sampling is per-connection
-	// upstream). Any subsequent Bind/Execute/Describe/Close referencing the same
-	// statement name must also be dropped to avoid the
-	// "prepared statement S_N does not exist" error on the shadow session.
-	// Entries are cleared on Close('S', name).
+	// Sticky-stmt tracking; see shouldMirrorPgFrame for the policy.
 	filteredStmtNames := map[string]struct{}{}
 
 	for {
@@ -370,9 +352,6 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 					payload:         append([]byte(nil), msg.Bytes()...),
 					expectsResponse: msg.Type == pgMsgQuery || msg.Type == pgMsgSync,
 				})
-				// On a Close('S', name) that we forwarded, clear sticky
-				// tracking for that name — a subsequent Parse with the same
-				// name starts fresh.
 				if msg.Type == pgMsgClose {
 					if kind, name := extractPgCloseTarget(msg); kind == 'S' && name != "" {
 						delete(filteredStmtNames, name)
@@ -414,34 +393,27 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 	}
 }
 
-// shouldMirrorPgFrame decides whether a pgwire frame should be enqueued to the
-// shadow worker. It implements the sticky-by-stmt-name policy required to
-// keep the shadow's prepared-statement lifecycle consistent under filtering:
+// shouldMirrorPgFrame applies the shadow-filter policy to a pgwire frame.
 //
-//   - Query / Parse: consult the deterministic filter (SQL-op + pattern). If
-//     a Parse is filtered, the statement name (if any) is added to
-//     filteredStmtNames so its downstream Bind/Execute/Describe/Close are
-//     also dropped.
-//   - Bind / Execute / Describe / Close (kind='S'): look up the referenced
-//     statement name; if it's in filteredStmtNames, drop the frame. Otherwise
-//     pass through.
-//   - Other frames (Sync, Flush, CopyData, etc.): always pass through —
-//     they don't carry stmt state and dropping them would desync the
-//     pipeline.
+// Why sticky-by-stmt-name: the extended query protocol splits a statement
+// across Parse → Bind → Execute, but only Parse carries QueryText. Filtering
+// per-frame would drop a Parse while its Bind/Execute (empty QueryText) sail
+// through, breaking the shadow session with "prepared statement S_N does not
+// exist". So we apply the deterministic filter to Query/Parse, remember the
+// stmt name of any Parse we dropped, and drop downstream Bind/Describe/Close
+// referencing that name. Sampling is handled even earlier — once per
+// connection, in startShadowWorker. Other frames (Sync, Flush, Execute alone,
+// CopyData) pass through to preserve pipeline ordering.
 //
-// The filteredStmtNames map is mutated in place when a Parse is dropped.
+// Mutates filteredStmtNames in place.
 func (p *PgProxy) shouldMirrorPgFrame(msg *PgPacket, req QueryRequest, filteredStmtNames map[string]struct{}) (bool, string) {
 	switch msg.Type {
 	case pgMsgQuery:
-		// Simple Query has no stmt-name lifecycle; just apply the filter.
 		return shouldShadowMirror(req, p.queryFilter)
 
 	case pgMsgParse:
 		allowed, reason := shouldShadowMirror(req, p.queryFilter)
 		if !allowed {
-			// Track the statement name (if any) so dependent frames stick.
-			// Unnamed Parse (name="") cannot be referenced later, so we
-			// don't track it — it would only get rebound by the next Parse.
 			if name := extractPgParseStmtName(msg); name != "" {
 				filteredStmtNames[name] = struct{}{}
 			}
@@ -467,8 +439,6 @@ func (p *PgProxy) shouldMirrorPgFrame(msg *PgPacket, req QueryRequest, filteredS
 	case pgMsgClose:
 		if kind, name := extractPgCloseTarget(msg); kind == 'S' && name != "" {
 			if _, ok := filteredStmtNames[name]; ok {
-				// Drop the Close itself AND clear the entry: there's no
-				// matching Parse on the shadow to close.
 				delete(filteredStmtNames, name)
 				return false, FilterReasonStickyStmt
 			}
@@ -476,14 +446,6 @@ func (p *PgProxy) shouldMirrorPgFrame(msg *PgPacket, req QueryRequest, filteredS
 		return true, FilterReasonNone
 
 	default:
-		// Sync, Flush, Execute, CopyData, etc. don't carry stmt names
-		// directly addressable to a Parse — passing them through preserves
-		// pipeline ordering. Execute references a portal that was Bound
-		// from a Parse; in our model, if the Parse was filtered the Bind
-		// would also have been dropped, so the portal never exists on the
-		// shadow and the Execute is a no-op there. Still: pass it through
-		// — it's safer than dropping a frame that could leave the shadow
-		// session waiting on a Sync that never comes.
 		return true, FilterReasonNone
 	}
 }

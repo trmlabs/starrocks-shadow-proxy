@@ -167,14 +167,8 @@ func extractPgQueryText(p *PgPacket) string {
 }
 
 // extractPgParseStmtName returns the statement name from a Parse 'P' frame.
-// Wire layout (after the 4-byte length prefix in p.Payload[0:4]):
-//
-//	stmt_name:cstring  query:cstring  n_params:int16  param_oids:int32*
-//
-// An unnamed (one-shot) Parse uses the empty string as the stmt name. Returns
-// "" both for the unnamed case and for any malformed input — callers treat
-// "" as "no sticky tracking" since unnamed statements are scoped to the next
-// Bind anyway and cannot be referenced later.
+// Wire (after the 4-byte length prefix): stmt_name:cstring  query:cstring  n_params:int16  param_oids:int32*.
+// Returns "" for unnamed-one-shot Parses and for malformed input.
 func extractPgParseStmtName(p *PgPacket) string {
 	if p == nil || p.Type != pgMsgParse || len(p.Payload) <= 4 {
 		return ""
@@ -187,12 +181,8 @@ func extractPgParseStmtName(p *PgPacket) string {
 	return string(body[:end])
 }
 
-// extractPgBindStmtName returns the statement name referenced by a Bind 'B'
-// frame. Wire layout:
-//
-//	portal:cstring  stmt_name:cstring  ...
-//
-// Same caveats as extractPgParseStmtName for the empty / malformed cases.
+// extractPgBindStmtName returns the statement name referenced by a Bind 'B' frame.
+// Wire: portal:cstring  stmt_name:cstring  ... Returns "" on empty/malformed.
 func extractPgBindStmtName(p *PgPacket) string {
 	if p == nil || p.Type != pgMsgBind || len(p.Payload) <= 4 {
 		return ""
@@ -211,12 +201,7 @@ func extractPgBindStmtName(p *PgPacket) string {
 }
 
 // extractPgCloseTarget returns (kind, name) for a Close 'C' frame.
-// Wire layout:
-//
-//	kind:byte ('S'=statement, 'P'=portal)  name:cstring
-//
-// kind is 0 on malformed input. Callers only sticky-track statement closes;
-// portal closes don't reference a Parse and don't affect shadow stmt state.
+// Wire: kind:byte ('S'=statement, 'P'=portal)  name:cstring. kind is 0 on malformed input.
 func extractPgCloseTarget(p *PgPacket) (byte, string) {
 	if p == nil || p.Type != pgMsgClose || len(p.Payload) <= 5 {
 		return 0, ""
@@ -231,8 +216,7 @@ func extractPgCloseTarget(p *PgPacket) (byte, string) {
 	return kind, string(rest[:end])
 }
 
-// extractPgDescribeTarget mirrors extractPgCloseTarget for Describe 'D' frames.
-// Wire layout is identical (kind byte + cstring name).
+// extractPgDescribeTarget mirrors extractPgCloseTarget for Describe 'D' frames (same wire shape).
 func extractPgDescribeTarget(p *PgPacket) (byte, string) {
 	if p == nil || p.Type != pgMsgDescribe || len(p.Payload) <= 5 {
 		return 0, ""

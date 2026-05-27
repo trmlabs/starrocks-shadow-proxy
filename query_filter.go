@@ -113,12 +113,7 @@ func (f *QueryFilter) Allow(req QueryRequest) (bool, string) {
 	return true, FilterReasonNone
 }
 
-// AllowDeterministic is Allow without the per-call sampling roll. Used by the
-// pgwire path where sampling is applied once per CONNECTION (in
-// startShadowWorker) — rolling per frame would let a Parse get filtered out
-// while its matching Bind/Execute (which carry no QueryText) ship anyway,
-// breaking the shadow session with "prepared statement S_N does not exist".
-// SQL operation + pattern filters remain deterministic, so they stay per-call.
+// AllowDeterministic is Allow without the sampling roll (pgwire samples per-connection).
 func (f *QueryFilter) AllowDeterministic(req QueryRequest) (bool, string) {
 	if req.QueryText == "" {
 		return true, FilterReasonNone
@@ -129,9 +124,7 @@ func (f *QueryFilter) AllowDeterministic(req QueryRequest) (bool, string) {
 	return true, FilterReasonNone
 }
 
-// SampleRate reports the configured per-connection sample rate. Callers in the
-// pgwire path roll once at startShadowWorker time and skip shadow mirroring
-// entirely for the connection if the roll fails.
+// SampleRate returns the configured sample rate (1.0 when nil/unset).
 func (f *QueryFilter) SampleRate() float64 {
 	if f == nil {
 		return 1.0

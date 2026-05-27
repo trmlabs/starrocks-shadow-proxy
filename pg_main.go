@@ -60,10 +60,7 @@ func runPostgresProxy(config *Config) {
 		shadowAddr = fmt.Sprintf("%s:%s", config.ShadowHost, config.ShadowPort)
 	}
 
-	// Health-check goroutine: pings the primary every 10s, plus the shadow
-	// when SHADOW_HOST is set. Mirrors main.go's mysql health checker so
-	// shadow_proxy_shadow_up / shadow_proxy_primary_up are populated for
-	// alerting on the gauges (which key off the gauges, not the protocol).
+	// 10s health probes feed primary_up / shadow_up gauges for alerting.
 	var (
 		healthMu       sync.RWMutex
 		primaryHealthy bool
