@@ -113,6 +113,19 @@ var (
 			Help: "Total number of shadow write errors",
 		},
 	)
+	// shadowDropped counts frames a worker rejected without enqueuing. Today
+	// the only labeled reason is conn_dead — the worker latched its dead flag
+	// after a write/read I/O error and is dropping the remainder of the
+	// client session's frames instead of retrying on a poisoned socket. Kept
+	// separate from shadow_proxy_queue_drops so the noise-floor distinction
+	// between "queue full" and "backend gone" stays usable during the cutover.
+	shadowDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_shadow_dropped_total",
+			Help: "Total number of shadow frames dropped without enqueue",
+		},
+		[]string{"reason"}, // "conn_dead"
+	)
 	totalConnections = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "shadow_proxy_connections_total",
@@ -163,6 +176,19 @@ var (
 		},
 		[]string{"target"},
 	)
+	// pgStickyStmtMapResets counts how many times a per-connection sticky-stmt
+	// map hit pgStickyStmtMapCap and was cleared to bound memory growth. Each
+	// reset loses sticky tracking for currently-tracked Parses (Bind/Execute
+	// for those names will leak to the shadow until a new Parse re-stickies).
+	// Alerting threshold: any non-zero rate suggests a client driver isn't
+	// issuing Close('S', …) and is likely creating unique stmt names per
+	// invocation (e.g. PREPARE … without DEALLOCATE).
+	pgStickyStmtMapResets = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "shadow_proxy_pg_sticky_stmt_map_resets_total",
+			Help: "Total times the per-connection sticky-stmt-name map was cleared after hitting its bound.",
+		},
+	)
 )
 
 // Worker registry for accurate queue depth tracking
@@ -211,6 +237,7 @@ func init() {
 	prometheus.MustRegister(shadowReadTimeouts)
 	prometheus.MustRegister(shadowDrainTimeouts)
 	prometheus.MustRegister(shadowWriteErrors)
+	prometheus.MustRegister(shadowDropped)
 	prometheus.MustRegister(totalConnections)
 	prometheus.MustRegister(connectionsWithShadow)
 	// Shadow filter metrics
@@ -221,4 +248,5 @@ func init() {
 	// Postgres command metrics
 	prometheus.MustRegister(pgCommands)
 	prometheus.MustRegister(pgPackets)
+	prometheus.MustRegister(pgStickyStmtMapResets)
 }

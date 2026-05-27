@@ -84,7 +84,8 @@ const (
 	FilterReasonNone         = ""              // Query is allowed
 	FilterReasonSQLOperation = "sql_operation" // Blocked by SQL operation type filter
 	FilterReasonPattern      = "pattern"       // Blocked by regex pattern filter
-	FilterReasonSampling     = "sampling"      // Dropped by random sampling
+	FilterReasonSampling     = "sampling"      // Dropped by random sampling (per-connection on pg path)
+	FilterReasonStickyStmt   = "sticky_stmt"   // pg path: Bind/Execute/Describe/Close for a Parse that was filtered
 )
 
 // Allow returns true if the query should be sent to the shadow cluster, along
@@ -110,6 +111,25 @@ func (f *QueryFilter) Allow(req QueryRequest) (bool, string) {
 	}
 
 	return true, FilterReasonNone
+}
+
+// AllowDeterministic is Allow without the sampling roll (pgwire samples per-connection).
+func (f *QueryFilter) AllowDeterministic(req QueryRequest) (bool, string) {
+	if req.QueryText == "" {
+		return true, FilterReasonNone
+	}
+	if allowed, reason := f.passesFilter(req); !allowed {
+		return false, reason
+	}
+	return true, FilterReasonNone
+}
+
+// SampleRate returns the configured sample rate (1.0 when nil/unset).
+func (f *QueryFilter) SampleRate() float64 {
+	if f == nil {
+		return 1.0
+	}
+	return f.sampleRate
 }
 
 func (f *QueryFilter) passesFilter(req QueryRequest) (bool, string) {

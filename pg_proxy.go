@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"time"
 
@@ -144,13 +145,25 @@ func (p *PgProxy) handleConnection(client net.Conn, logger *QueryLogger) {
 	p.runQueryLoop(clientConn, primaryConn, clientAddr, logger, shadow)
 }
 
-// startShadowWorker dials + auths the shadow backend (best-effort). Returns
-// nil if SHADOW_HOST is unset or the shadow connection fails — the primary
-// path keeps running either way.
+// startShadowWorker dials + auths the shadow backend (best-effort). Returns nil if
+// SHADOW_HOST is unset, the dial fails, or the per-connection sample roll loses.
+// Sampling is per-connection (not per-frame); see shouldMirrorPgFrame for why.
 func (p *PgProxy) startShadowWorker(startup *PgPacket, logger *QueryLogger) *PgShadowWorker {
 	if p.config.ShadowHost == "" {
 		return nil
 	}
+
+	if p.queryFilter != nil {
+		if rate := p.queryFilter.SampleRate(); rate < 1.0 {
+			if rand.Float64() >= rate {
+				shadowFilteredTotal.WithLabelValues(FilterReasonSampling).Inc()
+				connectionsWithoutShadow.Inc()
+				debugf(p.config, "PgProxy: shadow mirroring sampled out for this connection (rate=%.4f)", rate)
+				return nil
+			}
+		}
+	}
+
 	params := parseStartupParams(startup)
 	dbname := params["database"]
 	sw := NewPgShadowWorker(p.config, logger)
@@ -269,6 +282,17 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 	}
 }
 
+// pgStickyStmtMapCap caps the per-connection filteredStmtNames map. A noisy
+// client (or one in front of pgbouncer in session pooling) can issue many
+// Parse frames with unique names that never get Close('S')'d, growing the
+// map for the lifetime of the connection. The cap bounds that growth; on
+// overflow the map is cleared, which loses sticky tracking for currently-
+// tracked Parses — Bind/Execute that arrive next will leak through to the
+// shadow as if the Parse had never been filtered, which is the same
+// graceful-degradation mode that already exists when Bind/Execute arrive
+// without a preceding tracked Parse.
+const pgStickyStmtMapCap = 4096
+
 // runQueryLoop is the steady-state request/response loop with per-query timing.
 //
 // Loop invariant: at top of loop we are in "Idle" state (last server message
@@ -283,6 +307,9 @@ func (p *PgProxy) forwardAuthPhase(client, primary net.Conn) error {
 // Close, Flush) are forwarded without waiting; their timing is reported as just
 // the write latency (essentially zero).
 func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logger *QueryLogger, shadow *PgShadowWorker) {
+	// Sticky-stmt tracking; see shouldMirrorPgFrame for the policy.
+	filteredStmtNames := map[string]struct{}{}
+
 	for {
 		msg, err := ReadMessage(client)
 		if err != nil {
@@ -325,11 +352,7 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 		}
 
 		if shadow != nil && msg.Type != pgMsgTerminate {
-			// Filter SQL-carrying frames (Query, Parse) against the configured
-			// SHADOW_FILTER_*/SHADOW_SAMPLE_RATE policy before enqueuing. Other
-			// frames (Bind, Execute, Sync, etc.) pass through unconditionally to
-			// keep the shadow's prepared-statement lifecycle in sync.
-			allowed, filterReason := shouldShadowMirror(req, p.queryFilter)
+			allowed, filterReason := p.shouldMirrorPgFrame(msg, req, filteredStmtNames)
 			if !allowed {
 				shadowFilteredTotal.WithLabelValues(filterReason).Inc()
 				debugf(p.config, "PgProxy: shadow frame filtered (%s): %s", filterReason, req.Command)
@@ -340,6 +363,11 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 					payload:         append([]byte(nil), msg.Bytes()...),
 					expectsResponse: msg.Type == pgMsgQuery || msg.Type == pgMsgSync,
 				})
+				if msg.Type == pgMsgClose {
+					if kind, name := extractPgCloseTarget(msg); kind == 'S' && name != "" {
+						delete(filteredStmtNames, name)
+					}
+				}
 			}
 		}
 
@@ -373,6 +401,67 @@ func (p *PgProxy) runQueryLoop(client, primary net.Conn, clientAddr string, logg
 			p.copyFallback(client, primary)
 			return
 		}
+	}
+}
+
+// shouldMirrorPgFrame applies the shadow-filter policy to a pgwire frame.
+//
+// Why sticky-by-stmt-name: the extended query protocol splits a statement
+// across Parse → Bind → Execute, but only Parse carries QueryText. Filtering
+// per-frame would drop a Parse while its Bind/Execute (empty QueryText) sail
+// through, breaking the shadow session with "prepared statement S_N does not
+// exist". So we apply the deterministic filter to Query/Parse, remember the
+// stmt name of any Parse we dropped, and drop downstream Bind/Describe/Close
+// referencing that name. Sampling is handled even earlier — once per
+// connection, in startShadowWorker. Other frames (Sync, Flush, Execute alone,
+// CopyData) pass through to preserve pipeline ordering.
+//
+// Mutates filteredStmtNames in place.
+func (p *PgProxy) shouldMirrorPgFrame(msg *PgPacket, req QueryRequest, filteredStmtNames map[string]struct{}) (bool, string) {
+	switch msg.Type {
+	case pgMsgQuery:
+		return shouldShadowMirror(req, p.queryFilter)
+
+	case pgMsgParse:
+		allowed, reason := shouldShadowMirror(req, p.queryFilter)
+		if !allowed {
+			if name := extractPgParseStmtName(msg); name != "" {
+				if len(filteredStmtNames) >= pgStickyStmtMapCap {
+					clear(filteredStmtNames)
+					pgStickyStmtMapResets.Inc()
+				}
+				filteredStmtNames[name] = struct{}{}
+			}
+		}
+		return allowed, reason
+
+	case pgMsgBind:
+		if name := extractPgBindStmtName(msg); name != "" {
+			if _, ok := filteredStmtNames[name]; ok {
+				return false, FilterReasonStickyStmt
+			}
+		}
+		return true, FilterReasonNone
+
+	case pgMsgDescribe:
+		if kind, name := extractPgDescribeTarget(msg); kind == 'S' && name != "" {
+			if _, ok := filteredStmtNames[name]; ok {
+				return false, FilterReasonStickyStmt
+			}
+		}
+		return true, FilterReasonNone
+
+	case pgMsgClose:
+		if kind, name := extractPgCloseTarget(msg); kind == 'S' && name != "" {
+			if _, ok := filteredStmtNames[name]; ok {
+				delete(filteredStmtNames, name)
+				return false, FilterReasonStickyStmt
+			}
+		}
+		return true, FilterReasonNone
+
+	default:
+		return true, FilterReasonNone
 	}
 }
 

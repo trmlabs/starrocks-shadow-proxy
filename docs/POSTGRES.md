@@ -67,6 +67,8 @@ TLS:
 | `PRIMARY_TLS_ENABLED` | `false` | Backend-side TLS initiation. Required against AlloyDB. |
 | `PRIMARY_TLS_CA_FILE` | `""` | PEM bundle for verifying the backend cert. Empty = system roots. |
 | `PRIMARY_TLS_INSECURE_SKIP_VERIFY` | `false` | Dev only (self-signed). Must be `false` in production. |
+| `SHADOW_TLS_ENABLED` | `false` | TLS for the shadow hop (proxy → shadow backend). |
+| `SHADOW_TLS_INSECURE` | `false` | Skip cert verification on the shadow hop. Dev/staging only — startup logs a `WARNING` when set to `true`. |
 
 Vault integration for secrets is a deployment concern — the proxy reads plain env vars. Wire `PRIMARY_PASSWORD` / `SHADOW_PASSWORD` from a Vault Agent sidecar or a Kubernetes secret synced from Vault.
 
@@ -99,16 +101,19 @@ The existing `shadow_proxy_query_duration_seconds`, `shadow_proxy_queries_total`
 
 ## Shadow query filtering and sampling
 
-The shadow worker honors the same `SHADOW_FILTER_MODE` / `SHADOW_FILTER_SQL_OPERATIONS` / `SHADOW_FILTER_PATTERNS` / `SHADOW_SAMPLE_RATE` env vars as the MySQL path. Filtering only applies to SQL-carrying frames (Query, Parse); other frames (Bind, Execute, Sync, etc.) always pass through so the shadow's prepared-statement lifecycle stays in sync with the primary.
+The shadow worker honors the same `SHADOW_FILTER_MODE` / `SHADOW_FILTER_SQL_OPERATIONS` / `SHADOW_FILTER_PATTERNS` / `SHADOW_SAMPLE_RATE` env vars as the MySQL path, with two pgwire-specific differences:
+
+- **`SHADOW_SAMPLE_RATE` is evaluated once per client connection** (in `PgProxy.startShadowWorker`), not per frame. A per-frame roll under the extended query protocol could drop a `Parse` while letting its matching `Bind`/`Execute` (which carry no `QueryText`) ship to the shadow, breaking the session with `prepared statement S_N does not exist`. One roll per connection sidesteps that entirely. A losing roll increments `shadow_proxy_shadow_filtered_total{reason="sampling"}` once at connection start; the connection then runs primary-only.
+- **SQL-operation and pattern filters are sticky by statement name.** When a `Parse` is filtered out, its statement name is recorded for the connection; subsequent `Bind`/`Execute`/`Describe`/`Close` referencing that name are also filtered with `reason="sticky_stmt"`. A `Close('S', name)` clears the sticky entry so a fresh `Parse` with the same name starts cleanly.
 
 | Var | Default | Description |
 |---|---|---|
 | `SHADOW_FILTER_MODE` | `""` | `include` mirrors only matching queries; `exclude` mirrors everything except matches. Empty disables filtering. |
 | `SHADOW_FILTER_SQL_OPERATIONS` | _(empty)_ | Comma-separated operation classes (`SELECT`, `INSERT`, …) — pg's `Query`/`Parse` are matched by their statement text. |
 | `SHADOW_FILTER_PATTERNS` | _(empty)_ | Comma-separated regex patterns matched against the full query text. |
-| `SHADOW_SAMPLE_RATE` | `1.0` | Fraction of SQL-carrying frames to mirror after filter checks. `0.0` skips all; `1.0` mirrors all. |
+| `SHADOW_SAMPLE_RATE` | `1.0` | Fraction of client connections to mirror to the shadow. `0.0` skips all; `1.0` mirrors all. |
 
-Filtered frames are counted under `shadow_proxy_shadow_filtered_total{reason="sql_operation"|"pattern"|"sampling"}` and (when GCS query logging is enabled) emitted as `target="shadow",filtered=true` log rows so the BigQuery primary↔shadow join stays one-to-one.
+Filtered frames are counted under `shadow_proxy_shadow_filtered_total{reason="sql_operation"|"pattern"|"sampling"|"sticky_stmt"}` and (when GCS query logging is enabled) emitted as `target="shadow",filtered=true` log rows so the BigQuery primary↔shadow join stays one-to-one.
 
 ## Performance — TLS read path dominates CPU at high concurrency
 

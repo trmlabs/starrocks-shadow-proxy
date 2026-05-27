@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -27,6 +28,9 @@ type PgShadowWorker struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	closed  bool
+	// dead latches on first I/O error; reconnecting mid-session would break
+	// the shadow's prepared-statement lifecycle, so we drop until next conn.
+	dead atomic.Bool
 }
 
 type pgShadowFrame struct {
@@ -103,8 +107,12 @@ func (w *PgShadowWorker) Initialize(ctx context.Context, dbname string) error {
 	return nil
 }
 
-// Send enqueues a frame. Non-blocking — drops on full queue.
+// Send enqueues a frame. Non-blocking — drops on full queue or a dead worker.
 func (w *PgShadowWorker) Send(frame pgShadowFrame) bool {
+	if w.dead.Load() {
+		shadowDropped.WithLabelValues("conn_dead").Inc()
+		return false
+	}
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
@@ -191,6 +199,11 @@ func (w *PgShadowWorker) processFrame(frame pgShadowFrame) {
 	default:
 	}
 
+	if w.dead.Load() {
+		shadowDropped.WithLabelValues("conn_dead").Inc()
+		return
+	}
+
 	start := time.Now()
 	pgPackets.WithLabelValues("shadow").Inc()
 	pgCommands.WithLabelValues("shadow", pgFrontendCommandName(frame.payload[0])).Inc()
@@ -199,6 +212,7 @@ func (w *PgShadowWorker) processFrame(frame pgShadowFrame) {
 	if werr != nil {
 		shadowWriteErrors.Inc()
 		queryErrors.WithLabelValues("shadow").Inc()
+		w.markDead()
 		w.logExecution(frame.req, int64(nWritten), 0, time.Since(start), werr)
 		return
 	}
@@ -220,6 +234,7 @@ func (w *PgShadowWorker) processFrame(frame pgShadowFrame) {
 				shadowReadTimeouts.Inc()
 			}
 			queryErrors.WithLabelValues("shadow").Inc()
+			w.markDead()
 			w.logExecution(frame.req, int64(nWritten), bytesRead, time.Since(start), err)
 			return
 		}
@@ -234,6 +249,16 @@ func (w *PgShadowWorker) processFrame(frame pgShadowFrame) {
 	bytesTotal.WithLabelValues("shadow", "received").Add(float64(bytesRead))
 	queryDuration.WithLabelValues("shadow").Observe(duration.Seconds())
 	w.logExecution(frame.req, int64(nWritten), bytesRead, duration, nil)
+}
+
+// markDead latches the dead flag and closes the conn to unblock concurrent I/O. Idempotent.
+func (w *PgShadowWorker) markDead() {
+	if w.dead.Swap(true) {
+		return
+	}
+	if w.conn != nil {
+		_ = w.conn.Close()
+	}
 }
 
 func (w *PgShadowWorker) logExecution(req QueryRequest, bytesSent, bytesRecv int64, duration time.Duration, err error) {

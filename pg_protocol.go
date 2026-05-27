@@ -166,6 +166,71 @@ func extractPgQueryText(p *PgPacket) string {
 	return ""
 }
 
+// extractPgParseStmtName returns the statement name from a Parse 'P' frame.
+// Wire (after the 4-byte length prefix): stmt_name:cstring  query:cstring  n_params:int16  param_oids:int32*.
+// Returns "" for unnamed-one-shot Parses and for malformed input.
+func extractPgParseStmtName(p *PgPacket) string {
+	if p == nil || p.Type != pgMsgParse || len(p.Payload) <= 4 {
+		return ""
+	}
+	body := p.Payload[4:]
+	end := indexNull(body)
+	if end < 0 {
+		return ""
+	}
+	return string(body[:end])
+}
+
+// extractPgBindStmtName returns the statement name referenced by a Bind 'B' frame.
+// Wire: portal:cstring  stmt_name:cstring  ... Returns "" on empty/malformed.
+func extractPgBindStmtName(p *PgPacket) string {
+	if p == nil || p.Type != pgMsgBind || len(p.Payload) <= 4 {
+		return ""
+	}
+	body := p.Payload[4:]
+	portalEnd := indexNull(body)
+	if portalEnd < 0 || portalEnd+1 >= len(body) {
+		return ""
+	}
+	rest := body[portalEnd+1:]
+	end := indexNull(rest)
+	if end < 0 {
+		return ""
+	}
+	return string(rest[:end])
+}
+
+// extractPgCloseTarget returns (kind, name) for a Close 'C' frame.
+// Wire: kind:byte ('S'=statement, 'P'=portal)  name:cstring. kind is 0 on malformed input.
+func extractPgCloseTarget(p *PgPacket) (byte, string) {
+	if p == nil || p.Type != pgMsgClose || len(p.Payload) <= 5 {
+		return 0, ""
+	}
+	body := p.Payload[4:]
+	kind := body[0]
+	rest := body[1:]
+	end := indexNull(rest)
+	if end < 0 {
+		return kind, ""
+	}
+	return kind, string(rest[:end])
+}
+
+// extractPgDescribeTarget mirrors extractPgCloseTarget for Describe 'D' frames (same wire shape).
+func extractPgDescribeTarget(p *PgPacket) (byte, string) {
+	if p == nil || p.Type != pgMsgDescribe || len(p.Payload) <= 5 {
+		return 0, ""
+	}
+	body := p.Payload[4:]
+	kind := body[0]
+	rest := body[1:]
+	end := indexNull(rest)
+	if end < 0 {
+		return kind, ""
+	}
+	return kind, string(rest[:end])
+}
+
 // pgFrontendCommandName returns a human-readable label for a frontend message type.
 func pgFrontendCommandName(t byte) string {
 	switch t {
